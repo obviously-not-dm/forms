@@ -130,46 +130,13 @@ for (const a of articles) {
   }
 }
 
-// ---------- группа и начало ----------
+// ---------- начало ----------
 
-const CYR = { А: "A", В: "B", Е: "E", К: "K", М: "M", Н: "H", О: "O", Р: "P", С: "C", Т: "T", У: "Y", Х: "X" };
-
-function normalizeGroup(s) {
-  return s.toUpperCase().replace(/[АВЕКМНОРСТУХ]/g, (c) => CYR[c]).replace(/\s+/g, "");
-}
-
-function groupError(g) {
-  if (!g) return "Введите номер группы";
-  const pattern = body.dataset.groupPattern;
-  if (pattern && !new RegExp(pattern).test(g)) return "Номер группы как в расписании, например M3101";
-  return "";
-}
-
-const groupInput = $("group");
-groupInput.value = localStorage.getItem("trainer:group") || "";
-groupInput.addEventListener("input", () => {
-  const pos = groupInput.selectionStart;
-  groupInput.value = normalizeGroup(groupInput.value);
-  groupInput.setSelectionRange(pos, pos);
-  groupInput.classList.remove("invalid");
-  $("group-error").hidden = true;
-});
-groupInput.addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
 for (const r of document.querySelectorAll('input[name="mode"]')) r.checked = r.value === state.mode;
 
 $("start-btn").addEventListener("click", start);
 
 function start() {
-  const g = normalizeGroup(groupInput.value);
-  const err = groupError(g);
-  if (err) {
-    groupInput.classList.add("invalid");
-    $("group-error").textContent = err;
-    $("group-error").hidden = false;
-    groupInput.focus();
-    return;
-  }
-  localStorage.setItem("trainer:group", g);
   state.mode = document.querySelector('input[name="mode"]:checked').value;
   state.startedAt = Date.now();
   persist();
@@ -366,7 +333,7 @@ async function save() {
   if (!client) return;
   const { error } = await client.from("attempts").insert({
     quiz_id: testId,
-    group_name: localStorage.getItem("trainer:group") || null,
+    group_name: null,
     mode: state.mode,
     answers: state.answers,
     hints: state.hints,

@@ -320,7 +320,6 @@ function questionHtml(q) {
 
 function quizPage(test, site) {
   const { meta, sections, count } = test;
-  const groups = (site.groups || []).map((g) => `<option value="${esc(g)}">`).join("");
   const blocks = sections.map((s) => `
 <section class="block" data-title="${esc(s.title)}">
   ${s.title ? `<h2>${esc(s.title)}</h2>` : ""}
@@ -345,24 +344,17 @@ function quizPage(test, site) {
   </section>
 
   <section class="start" id="start">
-    <label class="group-field">
-      <span class="field-label">Группа</span>
-      <input id="group" type="text" list="groups" placeholder="M3101" autocomplete="off"
-             autocapitalize="characters" spellcheck="false" maxlength="12">
-      <datalist id="groups">${groups}</datalist>
-      <span class="field-error" id="group-error" hidden></span>
-    </label>
     <fieldset class="modes">
       <legend class="field-label">Как проходить</legend>
       <label class="mode">
         <input type="radio" name="mode" value="exam" checked>
-        <span class="mode-name">Как контрольная</span>
-        <span class="mode-desc">Ответы и разбор после отправки всего теста</span>
+        <span class="mode-name">Проверка в конце</span>
+        <span class="mode-desc">Отвечаете на все задания, потом смотрите результат и разбор</span>
       </label>
       <label class="mode">
         <input type="radio" name="mode" value="practice">
         <span class="mode-name">Тренировка</span>
-        <span class="mode-desc">Каждое задание можно проверить сразу</span>
+        <span class="mode-desc">Можно проверить каждое задание сразу и взять подсказку</span>
       </label>
     </fieldset>
     <button class="btn primary" id="start-btn" type="button">Начать</button>

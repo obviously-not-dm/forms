@@ -64,7 +64,7 @@ async function dashboard() {
   const since = el("input", { type: "date" });
   const mode = el("select", {},
     el("option", { value: "" }, "Все"),
-    el("option", { value: "exam" }, "Как контрольная"),
+    el("option", { value: "exam" }, "Проверка в конце"),
     el("option", { value: "practice" }, "Тренировка"));
   const out = el("div");
   const show = () => stats(test.value, since.value, mode.value, out);
