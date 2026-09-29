@@ -10,5 +10,6 @@ groupPattern: "^[A-Z]\\d{4,5}$"
 # Project Settings → API Keys. Ключ публичный (publishable / anon), секретный сюда не класть.
 # Пусто — сайт работает, но попытки не сохраняются.
 supabase:
-  url: ""
-  key: ""
+  url: "https://muqrkuqrlkuutealgimb.supabase.co" # project url
+  key: "sb_publishable_8OqiTFgIMwKdbxmTuKvL6w_3yMyaG84" # default publishable key
+  
