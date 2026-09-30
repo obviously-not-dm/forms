@@ -16,7 +16,11 @@ let resuming = false;   // подсказка «Продолжить с …» п
 // ---------- состояние ----------
 
 function fresh(mode = "exam") {
-  return { answers: {}, hints: {}, checked: {}, mode, startedAt: null, finished: false, result: null, feedback: "" };
+  return {
+    answers: {}, hints: {}, checked: {}, flags: {}, mode,
+    only: null, // работа над ошибками: id заданий, которые проходим заново
+    startedAt: null, finishedAt: null, finished: false, result: null, feedback: "",
+  };
 }
 
 function restore() {
@@ -39,6 +43,21 @@ function loadKey() {
   return keyPromise;
 }
 
+// задания текущего прохода: все или только ошибки прошлого раза
+function active() {
+  return state.only ? articles.filter((a) => state.only.includes(a.dataset.id)) : articles;
+}
+
+function applyScope() {
+  const set = new Set(active());
+  for (const a of articles) a.hidden = !set.has(a);
+  for (const sec of document.querySelectorAll(".block")) {
+    sec.hidden = ![...sec.querySelectorAll(".q")].some((a) => set.has(a));
+  }
+  for (const b of document.querySelectorAll("#map [data-go]")) b.hidden = !set.has(byId.get(b.dataset.go));
+  $("total").textContent = set.size;
+}
+
 // ---------- ответы ----------
 
 function valueOf(article) {
@@ -59,24 +78,30 @@ function applyValue(article, value) {
 }
 
 function answeredCount() {
-  return articles.filter((a) => isAnswered(a.dataset.type, state.answers[a.dataset.id])).length;
+  return active().filter((a) => isAnswered(a.dataset.type, state.answers[a.dataset.id])).length;
 }
 
 function updateProgress() {
   const done = answeredCount();
   $("count").textContent = done;
-  $("progress-bar").style.width = `${(100 * done) / articles.length}%`;
+  $("progress-bar").style.width = `${(100 * done) / active().length}%`;
   for (const b of document.querySelectorAll("#map [data-go]")) {
     const id = b.dataset.go;
     const a = byId.get(id);
     b.classList.toggle("answered", isAnswered(a.dataset.type, state.answers[id]));
     b.classList.toggle("hinted", (state.hints[id] || 0) > 0);
+    b.classList.toggle("flagged", Boolean(state.flags[id]));
     b.classList.toggle("right", a.classList.contains("is-right"));
     b.classList.toggle("wrong", a.classList.contains("is-wrong"));
   }
   for (const a of articles) {
     const btn = a.querySelector(".clear-btn");
     btn.hidden = a.classList.contains("locked") || !isAnswered(a.dataset.type, state.answers[a.dataset.id]);
+    const flagged = Boolean(state.flags[a.dataset.id]);
+    const flag = a.querySelector(".flag-btn");
+    flag.setAttribute("aria-pressed", flagged);
+    flag.textContent = flagged ? "Отмечено: вернуться позже" : "Вернуться позже";
+    a.classList.toggle("flagged", flagged);
   }
   if (!state.finished) resetConfirm();
 }
@@ -92,7 +117,8 @@ function formatProblem(article) {
 }
 
 function next(article) {
-  const n = articles[articles.indexOf(article) + 1];
+  const list = active();
+  const n = list[list.indexOf(article) + 1];
   if (!n) return;
   n.scrollIntoView({ behavior: "smooth", block: "start" });
   n.querySelector("input:not(:disabled)")?.focus({ preventScroll: true });
@@ -105,6 +131,12 @@ for (const a of articles) {
     updateProgress();
     const warn = a.querySelector(".format-warn");
     if (warn && !warn.hidden && !formatProblem(a)) warn.hidden = true;
+  });
+  a.querySelector(".flag-btn").addEventListener("click", () => {
+    if (state.flags[a.dataset.id]) delete state.flags[a.dataset.id];
+    else state.flags[a.dataset.id] = true;
+    persist();
+    updateProgress();
   });
   a.querySelector(".clear-btn").addEventListener("click", () => {
     delete state.answers[a.dataset.id];
@@ -144,7 +176,20 @@ function start() {
   articles[0]?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function setMode(mode) {
+  state.mode = mode;
+  persist();
+  applyMode();
+}
+
+for (const b of document.querySelectorAll("#mode-bar [data-mode]")) {
+  b.addEventListener("click", () => setMode(b.dataset.mode));
+}
+
 function applyMode() {
+  for (const b of document.querySelectorAll("#mode-bar [data-mode]")) {
+    b.setAttribute("aria-checked", b.dataset.mode === state.mode);
+  }
   body.classList.toggle("started", Boolean(state.startedAt));
   body.classList.toggle("mode-practice", state.mode === "practice");
   body.classList.toggle("finished", state.finished);
@@ -204,6 +249,14 @@ function showReview(article, q, expand = false) {
       const key = q.answer.includes(i);
       opt.classList.toggle("key", key);
       opt.classList.toggle("miss", chosen.has(i) && !key);
+      opt.querySelector(".opt-note")?.remove();
+      // примечание — у выбранных вариантов и у верных, которые студент пропустил
+      const note = q.notes?.[i];
+      if (note && (chosen.has(i) || key)) {
+        const box = el("div", "opt-note");
+        box.innerHTML = note; // собрано из нашего markdown при сборке
+        opt.querySelector(".opt-body").append(box);
+      }
     });
   }
 
@@ -211,6 +264,14 @@ function showReview(article, q, expand = false) {
   review.replaceChildren();
   review.append(el("p", "verdict",
     ok ? "Верно" : isAnswered(q.type, value) ? "Неверно" : "Нет ответа"));
+  if (!ok && q.type === "text" && isAnswered(q.type, value)) {
+    const hit = (q.answerNotes || []).find((n) => isCorrect({ ...q, answer: [n.answer] }, value));
+    if (hit) {
+      const box = el("p", "answer-note");
+      box.innerHTML = hit.note;
+      review.append(box);
+    }
+  }
   if (!ok) {
     const line = el("p", "key-line");
     if (q.type === "text") {
@@ -266,7 +327,7 @@ function offerResume() {
   const skipped = firstSkipped();
   if (!state.startedAt || state.finished || !done || !skipped) return;
   resuming = true;
-  $("action-note").textContent = `Отвечено ${done} из ${articles.length}.`;
+  $("action-note").textContent = `Отвечено ${done} из ${active().length}.`;
   const go = el("button", "btn quiet", `Продолжить с ${skipped.querySelector(".q-num").textContent}`);
   go.id = "to-skipped";
   go.type = "button";
@@ -278,15 +339,15 @@ function offerResume() {
 }
 
 function firstSkipped() {
-  return articles.find((a) => !isAnswered(a.dataset.type, state.answers[a.dataset.id]));
+  return active().find((a) => !isAnswered(a.dataset.type, state.answers[a.dataset.id]));
 }
 
 $("submit").addEventListener("click", () => {
-  const left = articles.length - answeredCount();
+  const left = active().length - answeredCount();
   if (left > 0 && !confirming) {
     resetConfirm();
     confirming = true;
-    $("action-note").textContent = `Без ответа: ${left} из ${articles.length}.`;
+    $("action-note").textContent = `Без ответа: ${left} из ${active().length}.`;
     $("submit").textContent = "Отправить так";
     const go = el("button", "btn quiet", "К пропущенному");
     go.id = "to-skipped";
@@ -303,13 +364,13 @@ $("submit").addEventListener("click", () => {
 async function finish() {
   $("submit").disabled = true;
   const key = await loadKey();
-  const questions = articles.map((a) => key.get(a.dataset.id));
+  const questions = active().map((a) => key.get(a.dataset.id));
   state.result = grade(questions, state.answers);
   state.finished = true;
   state.finishedAt = Date.now();
   confirming = false;
   persist();
-  for (const a of articles) showReview(a, key.get(a.dataset.id));
+  for (const a of active()) showReview(a, key.get(a.dataset.id));
   applyMode();
   showResult();
   updateProgress();
@@ -320,6 +381,7 @@ async function finish() {
 }
 
 function remember() {
+  if (state.only) return; // работу над ошибками в историю не пишем: результат не сравним с полным
   const k = `trainer:history:${testId}`;
   try {
     const h = JSON.parse(localStorage.getItem(k)) || [];
@@ -329,12 +391,14 @@ function remember() {
 }
 
 async function save() {
+  if (state.only) return; // в статистику идут только полные прохождения
   const client = await db().catch(() => null);
   if (!client) return;
   const { error } = await client.from("attempts").insert({
     quiz_id: testId,
     group_name: null,
-    mode: state.mode,
+    // если хоть одно задание проверяли по ходу, это тренировка, даже если в конце режим сменили
+    mode: Object.keys(state.checked).length ? "practice" : state.mode,
     answers: state.answers,
     hints: state.hints,
     score: state.result.score,
@@ -352,6 +416,7 @@ function showResult() {
   box.replaceChildren();
 
   const s = el("p", "score", `${score} из ${max}`);
+  const title = state.only ? el("p", "result-kind", "Работа над ошибками") : null;
   s.append(el("small", "", `${Math.round((100 * score) / max)}%`));
 
   const facts = [];
@@ -364,7 +429,7 @@ function showResult() {
 
   const blocks = el("div", "result-blocks");
   for (const sec of document.querySelectorAll(".block")) {
-    const qs = [...sec.querySelectorAll(".q")];
+    const qs = [...sec.querySelectorAll(".q")].filter((a) => !a.hidden);
     if (!sec.dataset.title || !qs.length) continue;
     const right = qs.filter((a) => a.classList.contains("is-right")).length;
     const row = el("p", "result-block");
@@ -373,7 +438,7 @@ function showResult() {
   }
 
   const map = el("div", "result-map");
-  for (const a of articles) {
+  for (const a of active()) {
     const b = el("button", a.classList.contains("is-right") ? "right" : "wrong", a.querySelector(".q-num").textContent);
     b.type = "button";
     b.addEventListener("click", () => a.scrollIntoView({ behavior: "smooth", block: "start" }));
@@ -388,9 +453,18 @@ function showResult() {
   toggle.append(cb, "Только ошибки");
   const again = el("button", "btn quiet", "Пройти ещё раз");
   again.type = "button";
-  again.addEventListener("click", restart);
-  actions.append(toggle, again);
+  again.addEventListener("click", () => restart(null));
+  actions.append(toggle);
+  const wrong = active().filter((a) => a.classList.contains("is-wrong")).map((a) => a.dataset.id);
+  if (wrong.length) {
+    const retry = el("button", "btn primary", `Прорешать ошибки (${wrong.length})`);
+    retry.type = "button";
+    retry.addEventListener("click", () => restart(wrong));
+    actions.append(retry);
+  }
+  actions.append(again);
 
+  if (title) box.append(title);
   box.append(s);
   if (facts.length) box.append(el("p", "result-facts", facts.join(", ")));
   if (blocks.children.length > 1) box.append(blocks);
@@ -398,11 +472,13 @@ function showResult() {
   box.hidden = false;
 }
 
-function restart() {
-  state = { ...fresh(state.mode), startedAt: Date.now() };
+// only — id заданий для работы над ошибками, null — весь тест заново
+function restart(only) {
+  state = { ...fresh(state.mode), only, startedAt: Date.now() };
   persist();
   for (const a of articles) {
     a.classList.remove("is-right", "is-wrong", "locked");
+    for (const n of a.querySelectorAll(".opt-note")) n.remove();
     for (const i of a.querySelectorAll("input")) i.disabled = false;
     for (const o of a.querySelectorAll(".opt")) o.classList.remove("key", "miss");
     a.querySelector(".text-input")?.classList.remove("right", "wrong");
@@ -417,6 +493,7 @@ function restart() {
   if ($("feedback")) $("feedback").value = "";
   $("result").hidden = true;
   body.classList.remove("only-wrong");
+  applyScope();
   applyMode();
   updateProgress();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -457,13 +534,14 @@ for (const a of articles) {
   applyValue(a, state.answers[a.dataset.id]);
   showHints(a, state.hints[a.dataset.id] || 0);
 }
+applyScope();
 applyMode();
 updateProgress();
 offerResume();
 
 if (state.finished || Object.keys(state.checked).length) {
   loadKey().then((key) => {
-    for (const a of articles) {
+    for (const a of active()) {
       if (state.finished || state.checked[a.dataset.id]) showReview(a, key.get(a.dataset.id));
     }
     if (state.finished) showResult();

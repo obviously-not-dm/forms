@@ -115,9 +115,14 @@ function plain(s) {
 
 const OPTION = /^- ([([])([xXхХ ])[)\]]\s+(.*)$/;
 const KEYWORD = /^(Ответ|Формат|Подсказка|Пояснение)\s*:\s*(.*)$/;
+// Примечание к варианту: строка с отступом и «>» сразу под вариантом.
+// Показывается после проверки, если студент выбрал этот вариант (или это верный вариант).
+const OPTION_NOTE = /^\s{2,}>\s?(.*)$/;
+// Примечание к неверному краткому ответу: «Если ответ 14: …».
+const ANSWER_NOTE = /^Если ответ\s+(.+?)\s*:\s+(.+)$/;
 
 function parseQuestion(id, lines, where, errors) {
-  const q = { id, text: [], options: [], answers: [], format: "", hints: [], explanation: [] };
+  const q = { id, text: [], options: [], answers: [], answerNotes: [], format: "", hints: [], explanation: [] };
   let mode = "text";
   for (const line of lines) {
     if (mode === "explanation") {
@@ -126,9 +131,15 @@ function parseQuestion(id, lines, where, errors) {
     }
     const opt = line.match(OPTION);
     const kw = line.match(KEYWORD);
+    const note = line.match(ANSWER_NOTE);
     if (opt) {
-      q.options.push({ kind: opt[1] === "(" ? "single" : "multiple", correct: opt[2].trim() !== "", md: opt[3] });
+      q.options.push({ kind: opt[1] === "(" ? "single" : "multiple", correct: opt[2].trim() !== "", md: opt[3], note: [] });
       mode = "option";
+    } else if (mode === "option" && OPTION_NOTE.test(line)) {
+      q.options.at(-1).note.push(line.match(OPTION_NOTE)[1]);
+    } else if (note) {
+      q.answerNotes.push({ answer: note[1].trim(), md: note[2].trim() });
+      mode = "field";
     } else if (kw) {
       const [, word, rest] = kw;
       if (word === "Ответ") q.answers.push(rest.trim());
@@ -162,6 +173,9 @@ function parseQuestion(id, lines, where, errors) {
     errors.push(`${where}: не отмечено ни одного верного варианта`);
   }
   if (q.options.length === 1) errors.push(`${where}: один вариант ответа`);
+  if (q.answerNotes.length && q.type !== "text") {
+    errors.push(`${where}: «Если ответ …:» бывает только у краткого ответа, у вариантов — строка «  > …» под вариантом`);
+  }
   if (q.type === "text") {
     if (!q.answers.length) errors.push(`${where}: нет ни вариантов, ни «Ответ:»`);
     if (!q.format) errors.push(`${where}: нет «Формат:» — студент не узнает, как вводить ответ`);
@@ -222,6 +236,8 @@ function parseTest(id) {
       q.optionsHtml = q.options.map((o) => md.parseInline(o.md));
       q.hintsHtml = q.hints.map((h) => md.parse(h.join("\n").trim()));
       q.explanationHtml = md.parse(q.explanation.join("\n").trim());
+      q.optionNotesHtml = q.options.map((o) => (o.note.length ? md.parse(o.note.join("\n").trim()) : null));
+      q.answerNotesHtml = q.answerNotes.map((n) => ({ answer: n.answer, note: md.parseInline(n.md) }));
       q.formatHtml = md.parseInline(q.format);
       q.pictures = q.options.length > 0 && q.options.every((o) => /^!\[/.test(o.md.trim()));
       q.key = keyOf(q);
@@ -252,6 +268,9 @@ function keyOf(q) {
 function checkKey(q, where, errors) {
   if (q.type !== "text") return;
   const k = q.key;
+  for (const n of q.answerNotes) {
+    if (isCorrect(k, n.answer)) errors.push(`${where}: «Если ответ ${n.answer}» — это верный ответ, примечание к нему не покажется`);
+  }
   // каждая строка ключа должна засчитываться как верный ответ
   for (const a of k.answer) {
     if (!isCorrect(k, a)) errors.push(`${where}: строка ключа «${a}» не разбирается как ${k.compare}`);
@@ -311,6 +330,7 @@ function questionHtml(q) {
     <div class="q-tools">
       ${q.hintsHtml.length ? `<button class="btn quiet hint-btn" type="button">Подсказка</button>` : ""}
       <button class="btn quiet check-btn" type="button">Проверить</button>
+      <button class="btn quiet flag-btn" type="button" aria-pressed="false">Вернуться позже</button>
       <button class="btn quiet clear-btn" type="button" hidden>Очистить ответ</button>
     </div>
     <div class="review" hidden></div>
@@ -333,7 +353,7 @@ function quizPage(test, site) {
 <header class="topbar">
   <a class="topbar-back" href="../" aria-label="Все тесты">Все тесты</a>
   <span class="topbar-title">${esc(meta.title)}</span>
-  <button class="topbar-count" id="map-open" type="button" aria-label="Карта заданий"><span id="count">0</span>&thinsp;/&thinsp;${count}</button>
+  <button class="topbar-count" id="map-open" type="button" aria-label="Карта заданий"><span id="count">0</span>&thinsp;/&thinsp;<span id="total">${count}</span></button>
   <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
 </header>
 <main class="sheet">
@@ -357,8 +377,17 @@ function quizPage(test, site) {
         <span class="mode-desc">Можно проверить каждое задание сразу и взять подсказку</span>
       </label>
     </fieldset>
+    <p class="mode-later">Режим можно поменять и во время прохождения.</p>
     <button class="btn primary" id="start-btn" type="button">Начать</button>
   </section>
+
+  <div class="mode-bar" id="mode-bar">
+    <span class="mode-bar-label" id="mode-bar-label">Режим</span>
+    <div class="seg" role="radiogroup" aria-labelledby="mode-bar-label">
+      <button type="button" role="radio" data-mode="exam">Проверка в конце</button>
+      <button type="button" role="radio" data-mode="practice">Тренировка</button>
+    </div>
+  </div>
 
   <section class="result" id="result" hidden></section>
 
@@ -391,8 +420,9 @@ function quizPage(test, site) {
 
 function indexPage(tests, site) {
   const md = new Marked({ breaks: true });
-  const items = tests.filter((t) => !t.meta.hidden).map((t) => `
-  <li><a href="${esc(t.id)}/" data-id="${esc(t.id)}" data-count="${t.count}">
+  const visible = tests.filter((t) => !t.meta.hidden);
+  const items = visible.map((t, i) => `
+  <li data-num="${String(visible.length - i).padStart(2, "0")}"><a href="${esc(t.id)}/" data-id="${esc(t.id)}" data-count="${t.count}">
     <span class="t-title">${esc(t.meta.title)}</span>
     <span class="t-meta">${tasksWord(t.count)}</span>
     <span class="t-status"></span>
@@ -448,7 +478,8 @@ function build() {
     err.list = errors;
     throw err;
   }
-  tests.sort((a, b) => (a.meta.order ?? 1e9) - (b.meta.order ?? 1e9) || a.id.localeCompare(b.id));
+  // свежие сверху: больший order — выше; без order — в конце
+  tests.sort((a, b) => (b.meta.order ?? -1e9) - (a.meta.order ?? -1e9) || a.id.localeCompare(b.id));
 
   fs.rmSync(DIST, { recursive: true, force: true });
   fs.mkdirSync(path.join(DIST, "assets"), { recursive: true });
@@ -488,7 +519,12 @@ function build() {
     fs.writeFileSync(path.join(out, "key.json"), JSON.stringify({
       id: t.id,
       title: t.meta.title,
-      questions: questions.map((q) => ({ ...q.key, explanation: q.explanationHtml })),
+      questions: questions.map((q) => {
+        const out = { ...q.key, explanation: q.explanationHtml };
+        if (q.optionNotesHtml.some(Boolean)) out.notes = q.optionNotesHtml;
+        if (q.answerNotesHtml.length) out.answerNotes = q.answerNotesHtml;
+        return out;
+      }),
     }));
   }
   fs.writeFileSync(path.join(DIST, "index.html"), indexPage(tests, site));

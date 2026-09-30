@@ -613,10 +613,10 @@ dialog::backdrop { background: rgba(12, 10, 24, 0.45); backdrop-filter: blur(3px
 
 /* ---------- главная ---------- */
 
-.tests { list-style: none; margin: 0; padding: 0; counter-reset: t; display: grid; gap: 0.6rem; }
-.tests li { counter-increment: t; position: relative; }
+.tests { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.tests li { position: relative; }
 .tests li::before {
-  content: counter(t, decimal-leading-zero);
+  content: attr(data-num);
   position: absolute;
   left: 1.1rem;
   top: 50%;
@@ -720,3 +720,55 @@ dialog::backdrop { background: rgba(12, 10, 24, 0.45); backdrop-filter: blur(3px
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- режим во время прохождения ---------- */
+
+.mode-later { color: var(--muted); font-size: 0.9rem; margin-top: -0.6rem; }
+.mode-bar { display: none; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin: 0 0 1rem; }
+.started:not(.finished) .mode-bar { display: flex; }
+.mode-bar-label { color: var(--muted); font-size: 0.9rem; }
+.seg { display: inline-flex; background: var(--card); border: 1.5px solid var(--line); border-radius: 999px; padding: 3px; }
+.seg button {
+  font: inherit;
+  font-size: 0.9rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.seg button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 500; }
+
+/* подсказки — в тренировке; уже открытые остаются видны */
+.hint-btn { display: none; }
+.mode-practice .hint-btn:not([hidden]) { display: inline-block; }
+
+/* ---------- «вернуться позже» ---------- */
+
+.flag-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.q.flagged:not(.locked) .q-num::after {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.map-grid .flagged { border-style: dashed; border-color: var(--accent); }
+.finished .flag-btn { display: none; }
+
+/* ---------- примечания к ответам ---------- */
+
+.opt-note, .answer-note {
+  font-size: 0.93rem;
+  color: var(--ink);
+  border-top: 1px dashed var(--line);
+  margin-top: 0.5rem;
+  padding-top: 0.45rem;
+}
+.opt-note > * { margin: 0; }
+.opt-note > * + * { margin-top: 0.35rem; }
+.answer-note { border: 0; margin: 0; padding: 0.55rem 0.8rem; border-radius: var(--radius); background: var(--bad-soft); }
+.pictures .opt-note { text-align: left; width: 100%; }
+
+.result-kind { font-weight: 600; color: var(--accent-ink); margin-bottom: -0.5rem; }
