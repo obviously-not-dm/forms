@@ -53,6 +53,7 @@ async function json(path, options = {}) {
 }
 
 function openPreviewModal(url, title = "Предпросмотр") {
+  const normUrl = (url.startsWith("/") || url.startsWith("http")) ? url : `/${url}`;
   let dlg = document.getElementById("admin-preview-dialog");
   if (!dlg) {
     dlg = el("dialog", { class: "admin-preview-dialog", id: "admin-preview-dialog" });
@@ -71,7 +72,7 @@ function openPreviewModal(url, title = "Предпросмотр") {
           }, "✕ Закрыть"))),
       el("iframe", {
         class: "admin-preview-frame",
-        src: url,
+        src: normUrl,
         title: title,
       }))
   );
@@ -284,7 +285,33 @@ function renderAdmin() {
 // 1. ВКЛАДКА: СТАТИСТИКА
 // ==========================================
 
+let statsSubTab = "tests"; // "tests" | "contests"
+
 async function statsTab(container) {
+  const subNav = el("div", { class: "admin-segmented-nav", style: "margin-bottom: 1.25rem;", role: "tablist" },
+    el("button", {
+      class: `admin-nav-item ${statsSubTab === "tests" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": statsSubTab === "tests",
+      onclick: () => { statsSubTab = "tests"; statsTab(container); },
+    }, "📋 Тренажёры курса"),
+    el("button", {
+      class: `admin-nav-item ${statsSubTab === "contests" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": statsSubTab === "contests",
+      onclick: () => { statsSubTab = "contests"; statsTab(container); },
+    }, "⏱️ Онлайн-контесты"));
+
+  const contentArea = el("div");
+  container.replaceChildren(subNav, contentArea);
+
+  if (statsSubTab === "contests") {
+    renderContestStats(contentArea);
+    return;
+  }
+
   let tests = [];
   try {
     const res = await json("/api/tests");
@@ -310,7 +337,7 @@ async function statsTab(container) {
     onclick: () => {
       const testId = testSelect.value;
       if (!testId) return;
-      json(`${testId}/key.json`).then(async (key) => {
+      json(`/${testId}/key.json`).then(async (key) => {
         const attempts = await loadAttempts(testId, sinceInput.value, modeSelect.value);
         const graded = attempts.map((r) => ({ ...r, g: grade(key.questions, r.answers || {}) }));
         csv(key, testId, graded);
@@ -355,10 +382,142 @@ async function statsTab(container) {
       exportBtn,
       clearBtn));
 
-  container.replaceChildren(toolbar, out);
+  contentArea.replaceChildren(toolbar, out);
 
   if (tests.length) show();
   else out.replaceChildren(el("p", { class: "muted" }, "Тесты не найдены."));
+}
+
+async function renderContestStats(out) {
+  out.replaceChildren(el("p", { class: "muted" }, "Загружаем контесты…"));
+  let contests = [];
+  try {
+    contests = await json("/api/contests");
+  } catch (e) {
+    out.replaceChildren(el("p", { class: "field-error" }, `Ошибка: ${e.message}`));
+    return;
+  }
+  if (!contests.length) {
+    out.replaceChildren(el("p", { class: "muted" }, "Контесты ещё не создавались. Перейдите во вкладку «Онлайн-контесты», чтобы запустить работу."));
+    return;
+  }
+
+  const contestSelect = el("select", {}, contests.map((c) => el("option", { value: c.id }, `${c.title} (${c.group_name === "all" ? "Все группы" : c.group_name}) — ${c.status === "active" ? "🟢 Идёт" : "🏁 Завершён"}`)));
+  const contentArea = el("div");
+
+  const loadSingle = async () => {
+    const id = contestSelect.value;
+    if (!id) return;
+    contentArea.replaceChildren(el("p", { class: "muted" }, "Загружаем результаты контеста…"));
+    try {
+      const res = await json(`/api/contests/${id}/standings`);
+      const { contest, standings = [] } = res;
+      if (!standings.length) {
+        contentArea.replaceChildren(
+          el("div", { style: "padding: 2.5rem 1.5rem; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); margin-top: 1rem;" },
+            el("div", { style: "font-size: 2.2rem; margin-bottom: 0.5rem;" }, "⏱️"),
+            el("h3", { style: "margin: 0 0 0.5rem;" }, "По этому контесту пока нет сданных работ"),
+            el("p", { class: "muted" }, "Студенты сдают решения во время пары. Результаты появятся здесь в реальном времени.")
+          )
+        );
+        return;
+      }
+
+      const total = standings.length;
+      const avgScore = Math.round(standings.reduce((s, r) => s + (r.score || 0), 0) / total * 10) / 10;
+      const maxScore = standings[0]?.max_score || 1;
+      const avgPct = Math.round(standings.reduce((s, r) => s + (r.percentage || 0), 0) / total);
+      const passedCount = standings.filter((r) => r.percentage >= 60).length;
+      const passRate = Math.round((passedCount / total) * 100);
+      const avgSec = Math.round(standings.reduce((s, r) => s + (r.duration_sec || 0), 0) / total);
+      const avgTimeStr = `${Math.floor(avgSec / 60)} мин ${avgSec % 60} с`;
+      const best = standings[0];
+
+      const kpis = el("div", { class: "kpi-grid" },
+        el("div", { class: "kpi-card" },
+          el("div", { class: "kpi-label" }, "Сдали работу"),
+          el("div", { class: "kpi-val" }, `${total}`),
+          el("div", { class: "kpi-sub" }, "студентов")),
+        el("div", { class: "kpi-card" },
+          el("div", { class: "kpi-label" }, "Средний балл"),
+          el("div", { class: "kpi-val", style: avgPct >= 60 ? "color: var(--good);" : "color: var(--accent);" }, `${avgScore} / ${maxScore}`),
+          el("div", { class: "kpi-sub" }, `${avgPct}% правильных`)),
+        el("div", { class: "kpi-card" },
+          el("div", { class: "kpi-label" }, "Сдали на зачёт (≥ 60%)"),
+          el("div", { class: "kpi-val", style: passRate >= 50 ? "color: var(--good);" : "color: var(--bad);" }, `${passRate}%`),
+          el("div", { class: "kpi-sub" }, `${passedCount} из ${total} студ.`)),
+        el("div", { class: "kpi-card" },
+          el("div", { class: "kpi-label" }, "Среднее время"),
+          el("div", { class: "kpi-val" }, avgTimeStr),
+          el("div", { class: "kpi-sub" }, `Лидер: ${best?.user_name || "—"} (${best?.score} б.)`))
+      );
+
+      // Groups breakdown
+      const grpMap = {};
+      for (const r of standings) {
+        const g = r.group_name || "без группы";
+        (grpMap[g] ||= []).push(r);
+      }
+      const grpRows = Object.entries(grpMap).sort(([a], [b]) => a.localeCompare(b, "ru")).map(([g, rs]) => {
+        const gAvgPct = Math.round(rs.reduce((s, r) => s + (r.percentage || 0), 0) / rs.length);
+        const gPassed = rs.filter((r) => r.percentage >= 60).length;
+        return [
+          g,
+          rs.length,
+          el("span", { class: "tag", style: gAvgPct >= 60 ? "background: var(--good-soft); color: var(--good);" : "" }, `${gAvgPct}%`),
+          `${gPassed} из ${rs.length}`,
+        ];
+      });
+
+      const grpTable = table(["Группа", "Участников", "Средний результат", "Сдали (≥ 60%)"], grpRows);
+
+      // Standings table
+      const standRows = standings.map((r, i) => [
+        el("strong", {}, r.badge || String(r.rank || (i + 1))),
+        el("strong", {}, r.user_name || "Студент"),
+        r.group_name || "—",
+        `${r.score} / ${r.max_score}`,
+        el("span", { class: "tag", style: r.percentage >= 60 ? "background: var(--good-soft); color: var(--good);" : "" }, `${r.percentage}%`),
+        `${Math.floor(r.duration_sec / 60)} мин ${r.duration_sec % 60} с`,
+        new Date(r.created_at).toLocaleTimeString("ru-RU"),
+      ]);
+      const standTable = table(["#", "Студент", "Группа", "Баллы", "Процент", "Время", "Сдано в"], standRows);
+
+      const csvBtn = el("button", {
+        class: "btn quiet btn-sm",
+        type: "button",
+        onclick: () => contestCsv(contest, standings),
+      }, "📥 Экспорт результатов в CSV");
+
+      const refreshBtn = el("button", {
+        class: "btn quiet btn-sm",
+        type: "button",
+        onclick: loadSingle,
+      }, "🔄 Обновить");
+
+      contentArea.replaceChildren(
+        kpis,
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem;" },
+          el("h3", { style: "margin: 0;" }, "Результаты по группам"),
+          el("div", { style: "display: flex; gap: 0.5rem;" }, refreshBtn, csvBtn)),
+        grpTable,
+        el("h3", { style: "margin: 1.5rem 0 0.5rem;" }, `Итоговая таблица студентов (${standings.length})`),
+        standTable
+      );
+    } catch (e) {
+      contentArea.replaceChildren(el("p", { class: "field-error" }, `Ошибка: ${e.message}`));
+    }
+  };
+
+  contestSelect.addEventListener("change", loadSingle);
+
+  const toolbar = el("div", { class: "stats-toolbar" },
+    el("div", { class: "stats-field-box", style: "flex: 1; min-width: 250px;" },
+      el("label", {}, "Выберите контест курса"),
+      contestSelect));
+
+  out.replaceChildren(toolbar, contentArea);
+  loadSingle();
 }
 
 function getDemoAttempts(testId) {
@@ -420,7 +579,7 @@ async function renderStats(testId, since, mode, out) {
   let key, rows;
   try {
     [key, rows] = await Promise.all([
-      json(`${testId}/key.json`),
+      json(`/${testId}/key.json`),
       loadAttempts(testId, since, mode),
     ]);
   } catch (e) {
@@ -549,6 +708,25 @@ function csv(key, testId, graded) {
   ].map(esc).join(";"));
   const blob = new Blob(["\ufeff" + [head.map(esc).join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
   const a = el("a", { href: URL.createObjectURL(blob), download: `${testId}.csv` });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function contestCsv(contest, standings) {
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const head = ["место", "студент", "группа", "баллы", "максимум", "процент", "секунд", "время_сдачи"];
+  const lines = (standings || []).map((r, i) => [
+    r.badge || r.rank || (i + 1),
+    r.user_name || "—",
+    r.group_name || "—",
+    r.score,
+    r.max_score,
+    `${r.percentage}%`,
+    r.duration_sec,
+    new Date(r.created_at).toISOString(),
+  ].map(esc).join(";"));
+  const blob = new Blob(["\ufeff" + [head.map(esc).join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: `contest_${contest?.id || 'export'}.csv` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -3223,7 +3401,7 @@ async function contestsTab(container) {
             el("span", {}, "Группа: ", el("strong", {}, c.group_name === "all" ? "Все" : c.group_name)),
             el("span", {}, "Время: ", el("strong", {}, `${c.duration_minutes} мин`)),
             el("span", {}, "Сдали: ", el("strong", {}, `${c.submissions_count || 0} чел.`)))),
-        el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+        el("div", { style: "display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;" },
           el("button", {
             class: `btn ${isSelected ? 'primary' : 'quiet'} btn-sm`,
             type: "button",
@@ -3231,7 +3409,7 @@ async function contestsTab(container) {
               selectedContestId = c.id;
               render();
             },
-          }, isSelected ? "🏆 Смотрим Standings" : "🏆 Результаты"),
+          }, isSelected ? "📊 Таблица открыта" : "📊 Результаты и таблица"),
           isLive ? el("button", {
             class: "btn quiet btn-sm",
             type: "button",
@@ -3242,10 +3420,11 @@ async function contestsTab(container) {
                 render();
               }
             },
-          }, "🛑 Завершить") : null,
+          }, "🛑 Остановить контест") : null,
           el("button", {
             class: "btn quiet btn-sm",
             type: "button",
+            title: "Удалить контест",
             onclick: async () => {
               if (confirm(`Удалить контест «${c.title}» и все его результаты?`)) {
                 await json(`/api/admin/contests/${c.id}`, { method: "DELETE" });
@@ -3253,7 +3432,7 @@ async function contestsTab(container) {
                 render();
               }
             },
-          }, "🗑️")));
+          }, "🗑️ Удалить")));
     };
 
     // 3. Standings viewer
@@ -3262,7 +3441,7 @@ async function contestsTab(container) {
       const selectedContest = contests.find((c) => c.id === selectedContestId);
       const isSelectedLive = selectedContest?.status === "active";
 
-      const standingsHeader = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;" },
+      const standingsHeader = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;" },
         el("h3", { style: "margin: 0;" }, `🏆 Турнирная таблица: ${selectedContest?.title || selectedContestId}`),
         el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
           isSelectedLive ? el("span", { style: "font-size: 0.78rem; color: #22c55e; font-weight: 600;" }, "🔄 Автообновление каждые 5 сек") : null,
@@ -3270,13 +3449,21 @@ async function contestsTab(container) {
             class: "btn quiet btn-sm",
             type: "button",
             onclick: () => loadStandings(selectedContestId),
-          }, "Обновить")));
+          }, "🔄 Обновить"),
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: async () => {
+              const res = await json(`/api/contests/${selectedContestId}/standings`);
+              contestCsv(res.contest, res.standings || []);
+            },
+          }, "📥 Экспорт CSV")));
 
       const standingsTableContainer = el("div", { id: "standings-table-container" },
         el("p", { class: "muted" }, "Загружаем результаты студентов…"));
 
       standingsBox.replaceChildren(
-        el("div", { style: "background: var(--surface); border: 2px solid var(--accent); border-radius: var(--radius-md); padding: 1.25rem; margin-top: 1.5rem;" },
+        el("div", { style: "background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 1.25rem; margin-top: 1.5rem;" },
           standingsHeader,
           standingsTableContainer));
 

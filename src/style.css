@@ -240,6 +240,26 @@ body.quiz:not(.started) .feedback { opacity: 0.85; }
 }
 .q.is-right { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
 .q.is-wrong { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+
+@keyframes qPulseHighlight {
+  0% {
+    box-shadow: 0 0 0 0 rgba(91, 63, 217, 0.45);
+    border-color: var(--accent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px rgba(91, 63, 217, 0.22);
+    border-color: var(--accent);
+  }
+  100% {
+    box-shadow: var(--shadow);
+    border-color: var(--line);
+  }
+}
+.q.q-pulse-highlight {
+  animation: qPulseHighlight 1.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+  border-color: var(--accent) !important;
+}
+
 .q-body { min-width: 0; }
 .q-text .katex, .explanation-body .katex, .opt-body .katex { white-space: normal; }
 .q-text p, .explanation-body p, .explanation-body li { overflow-x: auto; overflow-y: hidden; }
@@ -603,7 +623,7 @@ img.photo { background: #fff; }
   transition: transform 0.12s;
 }
 .map-grid button:hover, .result-map button:hover { transform: translateY(-1px); }
-.map-grid .answered { border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.map-grid .answered { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); font-weight: 700; }
 .map-grid .right, .result-map .right { border-color: transparent; background: var(--ok-soft); color: var(--ok); }
 .map-grid .wrong, .result-map .wrong { border-color: transparent; background: var(--bad-soft); color: var(--bad); }
 .map-grid .hinted::after {
@@ -1185,10 +1205,16 @@ dialog::backdrop { background: rgba(12, 10, 24, 0.45); backdrop-filter: blur(3px
 }
 .quiz-sidebar-map-grid button.answered,
 .sheet-map-grid button.answered {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  font-weight: 600;
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: var(--ok);
+  font-weight: 700;
+}
+.quiz-sidebar-map-grid button.answered:hover,
+.sheet-map-grid button.answered:hover {
+  background: color-mix(in srgb, var(--ok-soft) 80%, var(--ok));
+  border-color: var(--ok);
+  color: var(--ok);
 }
 .quiz-sidebar-map-grid button.flagged,
 .sheet-map-grid button.flagged {

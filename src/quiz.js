@@ -78,8 +78,13 @@ function applyValue(article, value) {
   for (const input of article.querySelectorAll("input")) input.checked = set.has(Number(input.value));
 }
 
+function isDone(a) {
+  const id = a.dataset.id;
+  return isAnswered(a.dataset.type, state.answers[id]) || Boolean(state.checked[id]);
+}
+
 function answeredCount() {
-  return active().filter((a) => isAnswered(a.dataset.type, state.answers[a.dataset.id])).length;
+  return active().filter(isDone).length;
 }
 
 function updateProgress() {
@@ -97,7 +102,7 @@ function updateProgress() {
     const id = b.dataset.go;
     const a = byId.get(id);
     if (!a) continue;
-    b.classList.toggle("answered", isAnswered(a.dataset.type, state.answers[id]));
+    b.classList.toggle("answered", isDone(a));
     b.classList.toggle("hinted", (state.hints[id] || 0) > 0);
     b.classList.toggle("flagged", Boolean(state.flags[id]));
     b.classList.toggle("right", a.classList.contains("is-right"));
@@ -112,7 +117,6 @@ function updateProgress() {
     flag.textContent = flagged ? "Отмечено: вернуться позже" : "Вернуться позже";
     a.classList.toggle("flagged", flagged);
   }
-  if (!state.finished) resetConfirm();
 }
 
 function formatProblem(article) {
@@ -151,6 +155,7 @@ function next(article) {
 
 for (const a of articles) {
   a.addEventListener("input", () => {
+    resetConfirm();
     state.answers[a.dataset.id] = valueOf(a);
     persist();
     updateProgress();
@@ -166,6 +171,7 @@ for (const a of articles) {
     updateProgress();
   });
   a.querySelector(".clear-btn").addEventListener("click", () => {
+    resetConfirm();
     delete state.answers[a.dataset.id];
     applyValue(a, null);
     persist();
@@ -240,7 +246,13 @@ function applyMode() {
   }
   body.classList.toggle("started", Boolean(state.startedAt));
   body.classList.toggle("mode-practice", state.mode === "practice");
-  updateSubmitButtons(state.mode === "practice" ? "Завершить" : "Отправить");
+  if (state.finished) {
+    updateSubmitButtons("Тест сдан", true);
+    setNote("Тест завершён. Ваши результаты сохранены выше.");
+    $("to-skipped")?.remove();
+  } else {
+    updateSubmitButtons(state.mode === "practice" ? "Завершить" : "Отправить", false);
+  }
   if ($("feedback")) $("feedback").disabled = state.finished;
 }
 
@@ -401,17 +413,21 @@ function offerResume() {
 }
 
 function firstSkipped() {
-  return active().find((a) => !isAnswered(a.dataset.type, state.answers[a.dataset.id]));
+  return active().find((a) => !isDone(a));
 }
 
 function handleSubmit() {
   ensureStarted();
+  if (state.finished) {
+    $("result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   const left = active().length - answeredCount();
   if (left > 0 && !confirming) {
-    resetConfirm();
     confirming = true;
-    setNote(`Без ответа: ${left} из ${active().length}.`);
-    updateSubmitButtons("Отправить так?");
+    setNote(`Осталось вопросов без ответа: ${left}. Нажмите «Отправить всё равно» или проверьте пропущенные.`);
+    updateSubmitButtons(`Отправить всё равно (${left})`);
+    $("to-skipped")?.remove();
     const go = el("button", "btn quiet", "К пропущенному");
     go.id = "to-skipped";
     go.type = "button";
@@ -435,6 +451,7 @@ async function finish() {
   state.finished = true;
   state.finishedAt = Date.now();
   confirming = false;
+  $("to-skipped")?.remove();
   persist();
   for (const a of active()) showReview(a, key.get(a.dataset.id));
   applyMode();
@@ -442,7 +459,6 @@ async function finish() {
   updateProgress();
   remember();
   window.scrollTo({ top: 0, behavior: "smooth" });
-  updateSubmitButtons(undefined, false);
   await save();
 }
 
@@ -572,9 +588,13 @@ function showResult() {
 // only — id заданий для работы над ошибками, null — весь тест заново
 function restart(only) {
   state = { ...fresh(state.mode), only, startedAt: Date.now() };
+  confirming = false;
+  resuming = false;
+  $("to-skipped")?.remove();
+  setNote("");
   persist();
   for (const a of articles) {
-    a.classList.remove("is-right", "is-wrong", "locked");
+    a.classList.remove("is-right", "is-wrong", "locked", "q-pulse-highlight");
     for (const n of a.querySelectorAll(".opt-note")) n.remove();
     for (const i of a.querySelectorAll("input")) i.disabled = false;
     for (const o of a.querySelectorAll(".opt")) o.classList.remove("key", "miss");
@@ -693,6 +713,17 @@ const spyObserver = new IntersectionObserver((entries) => {
 
 articles.forEach((a) => spyObserver.observe(a));
 
+function pulseQuestion(targetEl) {
+  if (!targetEl) return;
+  targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+  targetEl.classList.remove("q-pulse-highlight");
+  void targetEl.offsetWidth;
+  targetEl.classList.add("q-pulse-highlight");
+  setTimeout(() => {
+    targetEl.classList.remove("q-pulse-highlight");
+  }, 1600);
+}
+
 // Клик по любому номеру задания в сайдбаре или мобильной карте
 document.addEventListener("click", (e) => {
   const go = e.target.closest("[data-go]");
@@ -707,14 +738,7 @@ document.addEventListener("click", (e) => {
     const targetEl = byId.get(targetId);
     if (targetEl) {
       if (sheetMap && sheetMap.open) sheetMap.close();
-      targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
-      targetEl.style.transition = "outline 0.25s, box-shadow 0.25s";
-      targetEl.style.outline = "2px solid var(--accent)";
-      targetEl.style.boxShadow = "0 0 0 4px var(--accent-soft)";
-      setTimeout(() => {
-        targetEl.style.outline = "";
-        targetEl.style.boxShadow = "";
-      }, 1200);
+      pulseQuestion(targetEl);
     }
     return;
   }
@@ -747,14 +771,7 @@ function goToUnanswered() {
   ensureStarted();
   const target = firstSkipped() || active()[0];
   if (target) {
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
-    target.style.transition = "outline 0.25s, box-shadow 0.25s";
-    target.style.outline = "2px solid var(--accent)";
-    target.style.boxShadow = "0 0 0 4px var(--accent-soft)";
-    setTimeout(() => {
-      target.style.outline = "";
-      target.style.boxShadow = "";
-    }, 1200);
+    pulseQuestion(target);
   }
 }
 $("side-unanswered")?.addEventListener("click", goToUnanswered);

@@ -341,16 +341,16 @@ export function notesPage(notes = [], site = {}) {
   <link rel="stylesheet" href="../assets/style.css">
   <script>window.__NOTES_DATA__ = ${clientData};</script>
 </head>
-<body class="notes-body-app">
-  <header class="notes-topbar">
-    <div class="notes-topbar-left">
-      <a class="notes-back-link" href="../">← Все материалы</a>
-      <span class="notes-brand">📚 Конспекты по курсу ДМ</span>
+<body class="notes-body-app platform-body">
+  ${navbarHtml("../", "notes", site)}
+  <div class="notes-subbar" style="background: var(--card); border-bottom: 1px solid var(--line); padding: 0.5rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+    <div style="font-weight: 600; font-size: 0.95rem; color: var(--ink); display: flex; align-items: center; gap: 0.5rem;">
+      <span>📚 Конспекты и лекции курса</span>
     </div>
     <button type="button" class="btn quiet btn-sm notes-mobile-menu-btn" id="notes-menu-btn" aria-label="Открыть список тем конспектов">
       ☰ Темы
     </button>
-  </header>
+  </div>
   <div class="notes-layout">
     <aside class="notes-sidebar" aria-label="Список тем и лекций">
       <div class="notes-sidebar-header">
@@ -368,6 +368,8 @@ export function notesPage(notes = [], site = {}) {
       <nav class="notes-toc-links" id="notes-toc-links"></nav>
     </aside>
   </div>
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
   <script type="module" src="../js/notes.js"></script>
 </body>
 </html>
@@ -433,12 +435,10 @@ export function colloquiumsPage(colloquiums = [], site = {}) {
   <link rel="stylesheet" href="../assets/style.css">
   <script>window.__COLLOQUIUMS_DATA__ = ${clientData};</script>
 </head>
-<body class="colloquiums-app">
-  <header class="colloquiums-topbar">
-    <div class="colloquiums-topbar-left">
-      <a class="colloquiums-back-link" href="../">← Все материалы</a>
-      <span class="colloquiums-brand">🎓 Коллоквиумы по курсу ДМ</span>
-    </div>
+<body class="colloquiums-app platform-body">
+  ${navbarHtml("../", "colloquiums", site)}
+  <div class="colloquiums-subtopbar" style="background: var(--card); border-bottom: 1px solid var(--line); padding: 0.6rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+    <span class="colloquiums-brand" style="font-weight: 600; font-size: 1rem;">🎓 Коллоквиумы по курсу ДМ</span>
     <div class="colloquiums-mode-tabs" role="tablist">
       <button type="button" class="colloquiums-mode-btn active" data-mode="dict" role="tab" title="Читать все определения подряд">
         📖 Сборник определений (${visible.length})
@@ -447,7 +447,7 @@ export function colloquiumsPage(colloquiums = [], site = {}) {
         🗂️ Карточки (Quizlet)
       </button>
     </div>
-  </header>
+  </div>
 
   <main class="colloquiums-container">
     <!-- Filters and Search Toolbar -->
@@ -563,6 +563,8 @@ export function colloquiumsPage(colloquiums = [], site = {}) {
     </section>
   </main>
 
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
   <script type="module" src="../js/colloquiums.js"></script>
 </body>
 </html>
@@ -895,8 +897,11 @@ export function adminPage(site = {}) {
   <div class="admin-brand" style="font-weight: 700; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
     <span>🎓</span> <span>Кабинет преподавателя</span>
   </div>
-  <div class="admin-status-badge" style="font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent);">
-    Режим управления
+  <div style="display: flex; align-items: center; gap: 0.75rem;">
+    <a href="/" class="btn quiet btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; font-size: 0.82rem;">🏠 На платформу</a>
+    <div class="admin-status-badge" style="font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent);">
+      Режим управления
+    </div>
   </div>
 </header>
 <main class="sheet" id="app"><p class="muted">Загружаем…</p></main>
