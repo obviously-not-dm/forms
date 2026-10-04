@@ -24,6 +24,97 @@ ${math ? `<link rel="stylesheet" href="${rel}assets/katex/katex.min.css">\n` : "
 ${extra}</head>`;
 }
 
+export function navbarHtml(rel = "", activeTab = "", site = {}) {
+  return `
+<header class="topbar platform-topbar">
+  <div class="topbar-inner">
+    <div class="topbar-brand-wrap">
+      <a class="platform-logo" href="${rel}">
+        <span class="logo-icon">📐</span>
+        <div class="logo-titles">
+          <span class="logo-main">ДМ Платформа</span>
+          <span class="logo-sub">Дискретная математика</span>
+        </div>
+      </a>
+    </div>
+
+    <nav class="topbar-nav" id="platform-nav">
+      <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">🏠 Главная</a>
+      <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">⏱️ Контесты</a>
+      <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}#tests">📋 Тренажёры</a>
+      <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">📚 Конспекты</a>
+      <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">🎓 Коллоквиумы</a>
+      <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">🏆 Рейтинг</a>
+    </nav>
+
+    <div class="topbar-auth" id="topbar-auth-slot">
+      <button type="button" class="btn quiet btn-sm btn-auth-open" id="btn-auth-open">👤 Вход</button>
+    </div>
+
+    <button type="button" class="btn quiet btn-sm platform-burger" id="platform-burger" aria-label="Меню">
+      ☰
+    </button>
+  </div>
+</header>`;
+}
+
+export function authModalHtml(site = {}) {
+  const groupsList = (site.groups || []).map((g) => `<option value="${esc(g)}">`).join("");
+  return `
+<dialog id="auth-modal" class="auth-modal-dialog">
+  <div class="auth-modal-box">
+    <div class="auth-modal-header">
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab-btn active" data-tab="login" role="tab">Вход</button>
+        <button type="button" class="auth-tab-btn" data-tab="register" role="tab">Регистрация</button>
+      </div>
+      <button type="button" class="btn quiet btn-sm auth-close-btn" data-auth-close aria-label="Закрыть">✕</button>
+    </div>
+
+    <div class="auth-modal-body">
+      <!-- Login Form -->
+      <form class="auth-form" id="auth-login-form" data-form="login">
+        <div class="form-group">
+          <label class="form-label" for="login-email">Email или логин</label>
+          <input type="text" id="login-email" class="form-input" placeholder="student@itmo.ru" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="login-password">Пароль</label>
+          <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <div class="form-error" id="login-error" hidden></div>
+        <button type="submit" class="btn primary btn-block" id="btn-login-submit">Войти</button>
+      </form>
+
+      <!-- Register Form -->
+      <form class="auth-form" id="auth-register-form" data-form="register" hidden>
+        <div class="form-group">
+          <label class="form-label" for="reg-name">Фамилия и Имя</label>
+          <input type="text" id="reg-name" class="form-input" placeholder="Иван Иванов" required autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reg-group">Учебная группа</label>
+          <input type="text" id="reg-group" list="groups-list" class="form-input" placeholder="M3115" required maxlength="10">
+          <datalist id="groups-list">
+            ${groupsList}
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reg-email">Email</label>
+          <input type="email" id="reg-email" class="form-input" placeholder="ivanov@itmo.ru" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reg-password">Пароль (не менее 4 символов)</label>
+          <input type="password" id="reg-password" class="form-input" placeholder="••••••••" required minlength="4" autocomplete="new-password">
+        </div>
+        <div class="form-error" id="reg-error" hidden></div>
+        <button type="submit" class="btn primary btn-block" id="btn-register-submit">Зарегистрироваться</button>
+      </form>
+    </div>
+  </div>
+</dialog>`;
+}
+
 export function questionHtml(q) {
   const name = `q-${esc(q.id)}`;
   let answer;
@@ -505,81 +596,293 @@ export function indexPage(tests = [], notes = [], site = {}, colloquiumsCount = 
     </a>
   `).join("");
 
-  return `${head(site.title || "Тренажёры и конспекты", "")}
-<body class="home">
-<main class="sheet">
-  <section class="intro">
-    <h1>${esc(site.title || "Дискретная математика")}</h1>
-    ${site.description ? `<div class="lead">${md.parse(String(site.description))}</div>` : ""}
+  return `${head(site.title || "Дискретная математика — Образовательная платформа", "")}
+<body class="home platform-body">
+${navbarHtml("", "home", site)}
+
+<main class="platform-container">
+  <!-- Sort-Me Inspired Hero Banner -->
+  <section class="portal-hero">
+    <div class="hero-badge">🎓 Университетский курс · Факультет ИТ</div>
+    <h1 class="hero-title">${esc(site.title || "Дискретная математика")}</h1>
+    <p class="hero-desc">
+      Интерактивная образовательная платформа: онлайн-тренажёры, экспресс-летучки на парах, конспекты лекций и полный справочник определений к коллоквиумам.
+    </p>
+    <div class="hero-actions">
+      <a href="#tests" class="btn primary">📋 Начать тренировку</a>
+      <a href="contests/" class="btn quiet">⏱️ Онлайн-контесты</a>
+      <a href="leaderboard/" class="btn quiet">🏆 Рейтинг студентов</a>
+    </div>
   </section>
 
-  <div class="home-tabs-bar" role="tablist">
-    <button class="home-tab-btn active" data-tab="tests" role="tab" type="button">
-      📋 Тесты <span class="home-tab-count">${visible.length}</span>
-    </button>
-    <button class="home-tab-btn" data-tab="notes" role="tab" type="button">
-      📚 Конспекты и теория <span class="home-tab-count">${visibleNotes.length}</span>
-    </button>
-    <button class="home-tab-btn" data-tab="colloquiums" role="tab" type="button">
-      🎓 Коллоквиумы <span class="home-tab-count">${colloquiumsCount}</span>
-    </button>
-  </div>
+  <!-- Dynamic Active Contest Alert Banner (populated by JS) -->
+  <div id="home-active-contest-banner" class="home-contest-banner" hidden></div>
 
-  <div class="home-tab-panel active" data-panel="tests">
-    ${testTopics.length > 1 ? `
-    <div class="topic-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
-      <button class="btn quiet btn-sm topic-filter-btn active" data-topic="all" type="button">Все темы</button>
-      ${testTopics.map((tp) => `<button class="btn quiet btn-sm topic-filter-btn" data-topic="${esc(tp)}" type="button">${esc(tp)}</button>`).join("")}
-    </div>` : ""}
-    <ol class="tests">${testItems}
-    </ol>
-  </div>
+  <!-- Student Snapshot Card (if logged in, populated by JS) -->
+  <div id="home-student-card" hidden></div>
 
-  <div class="home-tab-panel" data-panel="notes">
-    <div class="notes-grid">
-      ${notesCards || '<p class="muted">Конспекты пока не добавлены.</p>'}
+  <!-- Two-Column Portal Layout -->
+  <div class="portal-layout">
+    <div class="portal-main-col">
+      <div class="home-tabs-bar" role="tablist">
+        <button class="home-tab-btn active" data-tab="tests" role="tab" type="button">
+          📋 Тренажёры <span class="home-tab-count">${visible.length}</span>
+        </button>
+        <button class="home-tab-btn" data-tab="notes" role="tab" type="button">
+          📚 Конспекты и теория <span class="home-tab-count">${visibleNotes.length}</span>
+        </button>
+        <button class="home-tab-btn" data-tab="colloquiums" role="tab" type="button">
+          🎓 Коллоквиумы <span class="home-tab-count">${colloquiumsCount}</span>
+        </button>
+      </div>
+
+      <div class="home-tab-panel active" data-panel="tests" id="tests">
+        ${testTopics.length > 1 ? `
+        <div class="topic-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
+          <button class="btn quiet btn-sm topic-filter-btn active" data-topic="all" type="button">Все темы</button>
+          ${testTopics.map((tp) => `<button class="btn quiet btn-sm topic-filter-btn" data-topic="${esc(tp)}" type="button">${esc(tp)}</button>`).join("")}
+        </div>` : ""}
+        <ol class="tests">${testItems}
+        </ol>
+      </div>
+
+      <div class="home-tab-panel" data-panel="notes">
+        <div class="notes-grid">
+          ${notesCards || '<p class="muted">Конспекты пока не добавлены.</p>'}
+        </div>
+      </div>
+
+      <div class="home-tab-panel" data-panel="colloquiums">
+        <div class="colloquiums-home-grid">
+          <div class="colloquium-promo-card">
+            <div class="colloquium-promo-icon">🎓</div>
+            <div class="colloquium-promo-body">
+              <h3>Коллоквиум 1: Множества, отношения, соответствия</h3>
+              <p>53 строгих определения из лекций Пермякова и Страдиной: множества, булеан, прямое произведение, бинарные отношения, все свойства, замыкания, фактор-множества, отношения порядка, решётки, отображения, мощности.</p>
+              <div class="colloquium-promo-footer">
+                <a href="colloquiums/?col=1&mode=dict" class="btn primary btn-sm">📖 Читать все определения (53) →</a>
+                <a href="colloquiums/?col=1&mode=cards" class="btn quiet btn-sm">🗂️ Карточки (Quizlet)</a>
+              </div>
+            </div>
+          </div>
+          <div class="colloquium-promo-card">
+            <div class="colloquium-promo-icon">⚡</div>
+            <div class="colloquium-promo-body">
+              <h3>Коллоквиум 2: Булева алгебра и теория кодирования</h3>
+              <p>53 строгих определения и формулы: высказывания, булевы функции, нормальные формы СДНФ/СКНФ, минимизация, полиномы Жегалкина, критерий Поста, энтропия Шеннона, коды Хаффмана и Хэмминга.</p>
+              <div class="colloquium-promo-footer">
+                <a href="colloquiums/?col=2&mode=dict" class="btn primary btn-sm">📖 Читать все определения (53) →</a>
+                <a href="colloquiums/?col=2&mode=cards" class="btn quiet btn-sm">🗂️ Карточки (Quizlet)</a>
+              </div>
+            </div>
+          </div>
+          <div class="colloquium-promo-card full-width">
+            <div class="colloquium-promo-icon">📖</div>
+            <div class="colloquium-promo-body">
+              <h3>Единый сборник всех определений курса (106 вопросов)</h3>
+              <p>Полный справочник всех определений с формулами KaTeX из лекций обоих преподавателей, мгновенным полнотекстовым поиском по формулам и терминам, и режимом интервального повторения Quizlet.</p>
+              <div class="colloquium-promo-footer">
+                <a href="colloquiums/?col=all&mode=dict" class="btn primary btn-sm">📖 Открыть полный сборник (106 определений) →</a>
+                <a href="colloquiums/?col=all&mode=cards" class="btn quiet btn-sm">🗂️ Все карточки (106)</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <div class="home-tab-panel" data-panel="colloquiums">
-    <div class="colloquiums-home-grid">
-      <div class="colloquium-promo-card">
-        <div class="colloquium-promo-icon">🎓</div>
-        <div class="colloquium-promo-body">
-          <h3>Коллоквиум 1: Множества, отношения, соответствия</h3>
-          <p>53 строгих определения из лекций Пермякова и Страдиной: множества, булеан, прямое произведение, бинарные отношения, все свойства, замыкания, фактор-множества, отношения порядка, решётки, отображения, мощности.</p>
-          <div class="colloquium-promo-footer">
-            <a href="colloquiums/?col=1&mode=dict" class="btn primary btn-sm">📖 Читать все определения (53) →</a>
-            <a href="colloquiums/?col=1&mode=cards" class="btn quiet btn-sm">🗂️ Карточки (Quizlet)</a>
-          </div>
+    <!-- Portal Sidebar: Top-5 Leaders & Fast Links -->
+    <aside class="portal-sidebar-col">
+      <div class="portal-sidebar-box">
+        <div class="sidebar-box-header">
+          <h3>🏆 Топ-5 студентов курса</h3>
+          <a href="leaderboard/" class="sidebar-more-link">Весь рейтинг →</a>
+        </div>
+        <div id="home-top5-leaderboard">
+          <p class="muted">Загружаем лидеров…</p>
         </div>
       </div>
-      <div class="colloquium-promo-card">
-        <div class="colloquium-promo-icon">⚡</div>
-        <div class="colloquium-promo-body">
-          <h3>Коллоквиум 2: Булева алгебра и теория кодирования</h3>
-          <p>53 строгих определения и формулы: высказывания, булевы функции, нормальные формы СДНФ/СКНФ, минимизация, полиномы Жегалкина, критерий Поста, энтропия Шеннона, коды Хаффмана и Хэмминга.</p>
-          <div class="colloquium-promo-footer">
-            <a href="colloquiums/?col=2&mode=dict" class="btn primary btn-sm">📖 Читать все определения (53) →</a>
-            <a href="colloquiums/?col=2&mode=cards" class="btn quiet btn-sm">🗂️ Карточки (Quizlet)</a>
-          </div>
-        </div>
+
+      <div class="portal-sidebar-box feature-box">
+        <h3>⏱️ Летучки на парах</h3>
+        <p>Преподаватель запускает 10-15 минутный онлайн-контест во время занятия. Таймер синхронизирован, результат сразу в турнирной таблице.</p>
+        <a href="contests/" class="btn quiet btn-sm btn-block">Перейти к контестам →</a>
       </div>
-      <div class="colloquium-promo-card full-width">
-        <div class="colloquium-promo-icon">📖</div>
-        <div class="colloquium-promo-body">
-          <h3>Единый сборник всех определений курса (106 вопросов)</h3>
-          <p>Полный справочник всех определений с формулами KaTeX из лекций обоих преподавателей, мгновенным полнотекстовым поиском по формулам и терминам, и режимом интервального повторения Quizlet.</p>
-          <div class="colloquium-promo-footer">
-            <a href="colloquiums/?col=all&mode=dict" class="btn primary btn-sm">📖 Открыть полный сборник (106 определений) →</a>
-            <a href="colloquiums/?col=all&mode=cards" class="btn quiet btn-sm">🗂️ Все карточки (106)</a>
-          </div>
-        </div>
-      </div>
-    </div>
+    </aside>
   </div>
 </main>
+
+${authModalHtml(site)}
+<script type="module" src="js/platform.js"></script>
 <script type="module" src="js/home.js"></script>
+</body>
+</html>
+`;
+}
+
+export function leaderboardPage(site = {}) {
+  return `${head("Рейтинг студентов — Дискретная математика", "../")}
+<body class="platform-body">
+  ${navbarHtml("../", "leaderboard", site)}
+
+  <main class="platform-container">
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <h1 class="page-title">🏆 Рейтинг студентов курса</h1>
+        <p class="page-subtitle">Сводный рейтинг успеваемости по решению тестов в режиме экзамена и участию в онлайн-контестах на парах.</p>
+      </div>
+      <div class="page-header-actions">
+        <span class="rating-rule-pill" title="100% за тест = 100 pts. Контесты дают дополнительные соревновательные очки">
+          ℹ️ Рейтинговая система ДМ
+        </span>
+      </div>
+    </div>
+
+    <!-- Toolbar: Groups Filter & Search -->
+    <div class="leaderboard-toolbar">
+      <div class="groups-filter-scroll" id="leaderboard-group-filters">
+        <button type="button" class="group-filter-pill active" data-group="all">Все группы</button>
+        ${(site.groups || []).map((g) => `<button type="button" class="group-filter-pill" data-group="${esc(g)}">${esc(g)}</button>`).join("")}
+      </div>
+      <div class="leaderboard-search-box">
+        <input type="search" id="leaderboard-search" class="leaderboard-search-input" placeholder="🔍 Поиск студента по имени...">
+      </div>
+    </div>
+
+    <!-- Leaderboard Table -->
+    <div class="leaderboard-card-wrapper">
+      <div class="table-responsive">
+        <table class="leaderboard-table" id="leaderboard-table">
+          <thead>
+            <tr>
+              <th class="col-rank">#</th>
+              <th class="col-student">Студент</th>
+              <th class="col-group">Группа</th>
+              <th class="col-rating">Рейтинг</th>
+              <th class="col-solved">Решено тестов</th>
+              <th class="col-avg">Ср. балл</th>
+              <th class="col-contests">Контесты</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-tbody">
+            <tr>
+              <td colspan="7" class="table-loading">Загружаем рейтинг студентов…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+</body>
+</html>
+`;
+}
+
+export function profilePage(site = {}) {
+  return `${head("Личный кабинет — Дискретная математика", "../")}
+<body class="platform-body">
+  ${navbarHtml("../", "profile", site)}
+
+  <main class="platform-container">
+    <div id="profile-container">
+      <p class="table-loading">Загружаем профиль студента…</p>
+    </div>
+  </main>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+</body>
+</html>
+`;
+}
+
+export function contestsPage(site = {}) {
+  return `${head("Онлайн-контесты — Дискретная математика", "../")}
+<body class="platform-body">
+  ${navbarHtml("../", "contests", site)}
+
+  <main class="platform-container">
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <h1 class="page-title">⏱️ Онлайн-контесты и летучки</h1>
+        <p class="page-subtitle">Проверочные работы на парах с таймером обратного отсчёта и мгновенной турнирной таблицей результатов.</p>
+      </div>
+    </div>
+
+    <div class="contests-sections-grid">
+      <!-- Live Contests Section -->
+      <section class="contests-section">
+        <div class="section-title-wrap">
+          <h2 class="section-title"><span class="live-dot pulse"></span> Активные контесты сейчас</h2>
+        </div>
+        <div class="contests-list" id="active-contests-list">
+          <p class="muted">Загружаем активные контесты…</p>
+        </div>
+      </section>
+
+      <!-- Finished Contests Section -->
+      <section class="contests-section" style="margin-top: 2.5rem;">
+        <div class="section-title-wrap">
+          <h2 class="section-title">🏁 Завершённые контесты</h2>
+        </div>
+        <div class="contests-list" id="finished-contests-list">
+          <p class="muted">Загружаем историю контестов…</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+</body>
+</html>
+`;
+}
+
+export function contestRoomPage(site = {}) {
+  return `${head("Контест — Дискретная математика", "../", '<link rel="stylesheet" href="../assets/katex/katex.min.css">\n', true)}
+<body class="platform-body contest-room-body">
+  <header class="contest-room-topbar">
+    <div class="contest-room-brand">
+      <a class="contest-exit-link" href="../contests/">← Выйти</a>
+      <span class="contest-title" id="room-contest-title">Загрузка контеста…</span>
+      <span class="contest-group-badge" id="room-contest-group"></span>
+    </div>
+
+    <div class="contest-timer-badge" id="contest-timer-box" title="Оставшееся время до автоматической сдачи">
+      <span class="timer-icon">⏳</span>
+      <span class="timer-digits" id="room-timer-digits">--:--</span>
+    </div>
+
+    <div class="contest-user-info" id="room-user-badge">
+      <span id="room-user-name">Студент</span>
+    </div>
+  </header>
+
+  <main class="contest-room-layout">
+    <div class="contest-sheet" id="contest-sheet">
+      <div id="contest-loading-state" class="contest-state-card">
+        <p>Подготавливаем задания контеста…</p>
+      </div>
+      <div id="contest-questions-container" hidden></div>
+    </div>
+  </main>
+
+  <footer class="contest-room-footer" id="contest-footer" hidden>
+    <div class="contest-footer-inner">
+      <span class="contest-answered-count" id="room-answered-count"></span>
+      <button type="button" class="btn primary btn-submit-contest" id="btn-submit-contest">
+        Завершить и сдать работу
+      </button>
+    </div>
+  </footer>
+
+  ${authModalHtml(site)}
+  <script src="../assets/katex/katex.min.js"></script>
+  <script type="module" src="../js/platform.js"></script>
 </body>
 </html>
 `;

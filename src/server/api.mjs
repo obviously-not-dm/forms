@@ -20,8 +20,27 @@ import {
   getColloquiumQuestionById,
   saveColloquiumQuestion,
   deleteColloquiumQuestion,
+  createUser,
+  getUserById,
+  getUserByEmail,
+  verifyUserCredentials,
+  updateUserRating,
+  getLeaderboard,
+  getStudentProfile,
+  createSession,
+  getSessionByToken,
+  deleteSessionByToken,
+  createContest,
+  getAllContests,
+  getContestById,
+  updateContestStatus,
+  deleteContest,
+  saveContestSubmission,
+  getContestSubmissions,
+  getUserContestSubmission,
 } from "./db.mjs";
 import { serializeTest, parseTest, serializeNote, parseNote, build } from "../compiler/builder.mjs";
+import { grade } from "../grade.js";
 
 const CONTENT = path.resolve("content");
 
@@ -29,7 +48,7 @@ const activeSessions = new Map();
 
 export function parseCookies(req) {
   const list = {};
-  const rc = req.headers.cookie;
+  const rc = req?.headers?.cookie;
   if (!rc) return list;
   rc.split(";").forEach((cookie) => {
     const parts = cookie.split("=");
@@ -46,17 +65,41 @@ export function parseCookies(req) {
 }
 
 export function getSession(req) {
+  if (!req) return null;
   const cookies = parseCookies(req);
-  const authHeader = req.headers.authorization || "";
-  const token = cookies.dm_admin_session || (authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null);
+  const authHeader = req?.headers?.authorization || "";
+  const token = cookies.dm_session || cookies.dm_admin_session || (authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null);
   if (!token) return null;
-  const sess = activeSessions.get(token);
-  if (!sess) return null;
-  if (Date.now() - sess.createdAt > 30 * 24 * 3600 * 1000) {
-    activeSessions.delete(token);
-    return null;
+
+  // 1. Check in-memory admin sessions
+  const memSess = activeSessions.get(token);
+  if (memSess) {
+    if (Date.now() - memSess.createdAt > 30 * 24 * 3600 * 1000) {
+      activeSessions.delete(token);
+      return null;
+    }
+    return {
+      token,
+      user: memSess.user,
+      role: memSess.role,
+      userId: "admin",
+      userObj: { id: "admin", email: memSess.user, name: "Преподаватель", role: "admin" },
+    };
   }
-  return { token, ...sess };
+
+  // 2. Check DB sessions
+  const dbSess = getSessionByToken(token);
+  if (dbSess) {
+    return {
+      token,
+      user: dbSess.user?.email || dbSess.user?.name || "Пользователь",
+      role: dbSess.role || "student",
+      userId: dbSess.user?.id,
+      userObj: dbSess.user,
+    };
+  }
+
+  return null;
 }
 
 export function sendJson(res, status, data) {
@@ -196,11 +239,45 @@ export async function handleApi(req, res, pathname) {
     // ----------------------------------------------------
     // AUTH API (LOGIN, SESSION, LOGOUT)
     // ----------------------------------------------------
+    // AUTH API (REGISTER, LOGIN, SESSION, LOGOUT)
+    // ----------------------------------------------------
+    if (normPath === "/api/auth/register" && method === "POST") {
+      const body = await readBody(req);
+      const email = String(body.email || "").trim();
+      const password = String(body.password || "");
+      const name = String(body.name || "").trim();
+      const group = String(body.group || body.group_name || "").trim().toUpperCase();
+
+      if (!email || !email.includes("@")) {
+        return sendJson(res, 400, { error: "Введите корректный email адрес" });
+      }
+      if (!password || password.length < 4) {
+        return sendJson(res, 400, { error: "Пароль должен содержать не менее 4 символов" });
+      }
+      if (!name || name.length < 2) {
+        return sendJson(res, 400, { error: "Введите ваши имя и фамилию" });
+      }
+
+      try {
+        const newUser = createUser({ email, password, name, group_name: group, role: "student" });
+        const sess = createSession(newUser.id, "student");
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Set-Cookie": `dm_session=${sess.token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`,
+          "Access-Control-Allow-Origin": "*",
+        });
+        return res.end(JSON.stringify({ ok: true, token: sess.token, user: newUser }));
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
+    }
+
     if (normPath === "/api/auth/login" && method === "POST") {
       const body = await readBody(req);
       const user = String(body.login || body.email || body.username || "").trim();
       const pass = String(body.password || "");
 
+      // 1. Check admin login
       const expectedUser = (process.env.ADMIN_USER || "admin@itmo.ru").trim();
       const expectedPass = String(process.env.ADMIN_PASSWORD || "admin");
 
@@ -209,33 +286,53 @@ export async function handleApi(req, res, pathname) {
         (expectedUser.toLowerCase() === "admin@itmo.ru" && user.toLowerCase() === "admin");
       const isPassMatch = pass === expectedPass;
 
-      if (!isUserMatch || !isPassMatch) {
-        return sendJson(res, 401, { error: "Неверный логин или пароль администратора" });
+      if (isUserMatch && isPassMatch) {
+        const token = crypto.randomBytes(32).toString("hex");
+        activeSessions.set(token, { user: expectedUser, role: "admin", createdAt: Date.now() });
+
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Set-Cookie": `dm_admin_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`,
+          "Access-Control-Allow-Origin": "*",
+        });
+        return res.end(JSON.stringify({
+          ok: true,
+          token,
+          user: { login: expectedUser, role: "admin", name: "Преподаватель" },
+        }));
       }
 
-      const token = crypto.randomBytes(32).toString("hex");
-      activeSessions.set(token, { user: expectedUser, role: "admin", createdAt: Date.now() });
+      // 2. Check student credentials in SQLite DB
+      const dbUser = verifyUserCredentials(user, pass);
+      if (dbUser) {
+        const sess = createSession(dbUser.id, "student");
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Set-Cookie": `dm_session=${sess.token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`,
+          "Access-Control-Allow-Origin": "*",
+        });
+        return res.end(JSON.stringify({ ok: true, token: sess.token, user: dbUser }));
+      }
 
-      res.writeHead(200, {
-        "Content-Type": "application/json; charset=utf-8",
-        "Set-Cookie": `dm_admin_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`,
-        "Access-Control-Allow-Origin": "*",
-      });
-      return res.end(JSON.stringify({ ok: true, token, user: { login: expectedUser, role: "admin" } }));
+      return sendJson(res, 401, { error: "Неверный логин или пароль" });
     }
 
-    if (normPath === "/api/auth/session" && method === "GET") {
+    if ((normPath === "/api/auth/session" || normPath === "/api/auth/me") && method === "GET") {
       const sess = getSession(req);
       if (!sess) {
         return sendJson(res, 200, { authenticated: false });
       }
-      return sendJson(res, 200, { authenticated: true, user: { login: sess.user, role: sess.role } });
+      return sendJson(res, 200, {
+        authenticated: true,
+        user: sess.userObj || { login: sess.user, role: sess.role },
+      });
     }
 
     if (normPath === "/api/auth/logout" && (method === "POST" || method === "GET")) {
       const sess = getSession(req);
       if (sess) {
         activeSessions.delete(sess.token);
+        deleteSessionByToken(sess.token);
       }
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
@@ -608,6 +705,13 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
     // POST /api/attempts (and /api/stats/submit)
     if ((normPath === "/api/attempts" || normPath === "/api/stats/submit" || normPath === "/api/stats") && method === "POST") {
       const body = await readBody(req);
+      const sess = getSession(req);
+      if (sess?.userId && !body.user_id) {
+        body.user_id = sess.userId;
+      }
+      if (sess?.userObj?.group_name && !body.group_name) {
+        body.group_name = sess.userObj.group_name;
+      }
       const attempt = saveAttempt(body);
       return sendJson(res, 200, { ok: true, attempt, id: attempt.id });
     }
@@ -624,6 +728,166 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       }
       clearAttempts(quizId);
       return sendJson(res, 200, { ok: true });
+    }
+
+    // ----------------------------------------------------
+    // STUDENT PROFILE & LEADERBOARD API
+    // ----------------------------------------------------
+
+    // GET /api/student/profile
+    if (normPath === "/api/student/profile" && method === "GET") {
+      const url = new URL(req.url, "http://localhost");
+      const sess = getSession(req);
+      const targetUserId = url.searchParams.get("userId") || (sess?.userId !== "admin" ? sess?.userId : null);
+
+      if (!targetUserId) {
+        return sendJson(res, 401, { error: "Необходима авторизация студента" });
+      }
+
+      const profile = getStudentProfile(targetUserId);
+      if (!profile) {
+        return sendJson(res, 404, { error: "Студент не найден" });
+      }
+      return sendJson(res, 200, profile);
+    }
+
+    // GET /api/leaderboard
+    if (normPath === "/api/leaderboard" && method === "GET") {
+      const url = new URL(req.url, "http://localhost");
+      const group = url.searchParams.get("group") || null;
+      const limit = Number(url.searchParams.get("limit") || 100);
+      const rows = getLeaderboard({ group, limit });
+      return sendJson(res, 200, rows);
+    }
+
+    // ----------------------------------------------------
+    // CONTESTS API
+    // ----------------------------------------------------
+
+    // GET /api/contests
+    if (normPath === "/api/contests" && method === "GET") {
+      const url = new URL(req.url, "http://localhost");
+      const group = url.searchParams.get("group") || null;
+      const contests = getAllContests({ group_name: group });
+      return sendJson(res, 200, contests);
+    }
+
+    // POST /api/admin/contests or POST /api/contests (admin create contest)
+    if ((normPath === "/api/admin/contests" || normPath === "/api/contests") && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может создавать контесты" });
+      }
+      const body = await readBody(req);
+      if (!body.title || !body.test_id) {
+        return sendJson(res, 400, { error: "Укажите название и ID теста для контеста" });
+      }
+      const contest = createContest(body);
+      return sendJson(res, 200, { ok: true, contest });
+    }
+
+    // Contests match by ID
+    const contestStopMatch = normPath.match(/^\/api\/admin\/contests\/([^/?#]+)\/stop$/);
+    if (contestStopMatch && (method === "PUT" || method === "POST")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может завершать контесты" });
+      }
+      const contestId = decodeURIComponent(contestStopMatch[1]).trim();
+      const updated = updateContestStatus(contestId, "finished");
+      return sendJson(res, 200, { ok: true, contest: updated });
+    }
+
+    const contestStandingsMatch = normPath.match(/^\/api\/contests\/([^/?#]+)\/standings$/);
+    if (contestStandingsMatch && method === "GET") {
+      const contestId = decodeURIComponent(contestStandingsMatch[1]).trim();
+      const contest = getContestById(contestId);
+      if (!contest) return sendJson(res, 404, { error: "Контест не найден" });
+      const standings = getContestSubmissions(contestId);
+      return sendJson(res, 200, { contest, standings });
+    }
+
+    const contestSubmitMatch = normPath.match(/^\/api\/contests\/([^/?#]+)\/submit$/);
+    if (contestSubmitMatch && method === "POST") {
+      const sess = getSession(req);
+      const contestId = decodeURIComponent(contestSubmitMatch[1]).trim();
+      const contest = getContestById(contestId);
+      if (!contest) return sendJson(res, 404, { error: "Контест не найден" });
+
+      if (contest.status === "finished") {
+        return sendJson(res, 400, { error: "Время контеста истекло, приём работ завершён" });
+      }
+
+      const body = await readBody(req);
+      const userId = sess?.userId || body.user_id || body.userId;
+      const userName = sess?.userObj?.name || body.user_name || body.userName || "Студент";
+      const groupName = sess?.userObj?.group_name || body.group_name || body.group || "";
+
+      if (!userId) {
+        return sendJson(res, 401, { error: "Для сдачи контеста необходимо войти в аккаунт" });
+      }
+
+      // Grade against key.json
+      const keyPath = path.join(CONTENT, contest.test_id, "key.json");
+      let score = 0;
+      let maxScore = 0;
+      let results = {};
+
+      if (fs.existsSync(keyPath)) {
+        try {
+          const keyData = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+          const graded = grade(keyData.questions || [], body.answers || {});
+          score = graded.score;
+          maxScore = graded.max;
+          results = graded.results;
+        } catch (err) {
+          console.warn("Grading error for contest submission:", err);
+        }
+      }
+
+      const submission = saveContestSubmission({
+        contest_id: contestId,
+        user_id: userId,
+        user_name: userName,
+        group_name: groupName,
+        score,
+        max_score: maxScore,
+        duration_sec: body.duration_sec || 0,
+        answers: body.answers || {},
+      });
+
+      return sendJson(res, 200, { ok: true, submission, results });
+    }
+
+    const contestAdminMatch = normPath.match(/^\/api\/admin\/contests\/([^/?#]+)$/);
+    if (contestAdminMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может удалять контесты" });
+      }
+      const contestId = decodeURIComponent(contestAdminMatch[1]).trim();
+      deleteContest(contestId);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    const contestMatch = normPath.match(/^\/api\/contests\/([^/?#]+)$/);
+    if (contestMatch && method === "GET") {
+      const contestId = decodeURIComponent(contestMatch[1]).trim();
+      const contest = getContestById(contestId);
+      if (!contest) return sendJson(res, 404, { error: "Контест не найден" });
+
+      const test = getTestById(contest.test_id);
+      let count = 0;
+      try {
+        const parsed = parseTest(contest.test_id);
+        count = parsed ? parsed.count : 0;
+      } catch {}
+
+      return sendJson(res, 200, {
+        ...contest,
+        test_title: test?.title || contest.test_id,
+        count,
+      });
     }
 
     return sendJson(res, 404, { error: "API endpoint не найден" });

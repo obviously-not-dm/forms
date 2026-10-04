@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import yaml from "yaml";
 
 const DATA_DIR = path.resolve("data");
@@ -84,6 +85,7 @@ function initSchema(db) {
       CREATE TABLE attempts (
         id TEXT PRIMARY KEY,
         quiz_id TEXT,
+        user_id TEXT,
         group_name TEXT,
         mode TEXT DEFAULT 'exam',
         answers TEXT,
@@ -95,11 +97,70 @@ function initSchema(db) {
         created_at TEXT
       );
     `);
+  } else if (!attemptCols.includes("user_id")) {
+    db.exec("ALTER TABLE attempts ADD COLUMN user_id TEXT;");
   }
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_attempts_quiz ON attempts(quiz_id);
+    CREATE INDEX IF NOT EXISTS idx_attempts_user ON attempts(user_id);
     CREATE INDEX IF NOT EXISTS idx_attempts_created ON attempts(created_at);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE,
+      password_hash TEXT,
+      name TEXT,
+      group_name TEXT,
+      role TEXT DEFAULT 'student',
+      rating INTEGER DEFAULT 0,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT,
+      role TEXT,
+      expires_at TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS contests (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      test_id TEXT,
+      group_name TEXT,
+      duration_minutes INTEGER DEFAULT 15,
+      starts_at TEXT,
+      ends_at TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS contest_submissions (
+      id TEXT PRIMARY KEY,
+      contest_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      group_name TEXT,
+      score REAL DEFAULT 0,
+      max_score REAL DEFAULT 0,
+      percentage REAL DEFAULT 0,
+      duration_sec INTEGER DEFAULT 0,
+      answers TEXT,
+      created_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_users_group ON users(group_name);
+    CREATE INDEX IF NOT EXISTS idx_users_rating ON users(rating DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_contests_status ON contests(status);
+    CREATE INDEX IF NOT EXISTS idx_submissions_contest ON contest_submissions(contest_id);
+    CREATE INDEX IF NOT EXISTS idx_submissions_user ON contest_submissions(user_id);
   `);
 
   db.exec(`
@@ -381,6 +442,8 @@ export function saveAttempt({
   quiz_id = null,
   testId = null,
   test_id = null,
+  user_id = null,
+  userId = null,
   group_name = null,
   userName = null,
   user_name = null,
@@ -397,19 +460,21 @@ export function saveAttempt({
   const db = getDb();
   const attemptId = id || `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const quizId = quiz_id || testId || test_id || "";
+  const finalUserId = user_id || userId || null;
   const group = group_name || userName || user_name || null;
   const finalScore = Number(score || 0);
   const finalMaxScore = Number(max_score || maxScore || 0);
   const now = created_at || new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO attempts (id, quiz_id, group_name, mode, answers, hints, score, max_score, feedback, duration_sec, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO attempts (id, quiz_id, user_id, group_name, mode, answers, hints, score, max_score, feedback, duration_sec, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
     attemptId,
     quizId,
+    finalUserId,
     group,
     mode || "exam",
     typeof answers === "string" ? answers : JSON.stringify(answers || {}),
@@ -421,9 +486,18 @@ export function saveAttempt({
     now
   );
 
+  if (finalUserId) {
+    try {
+      updateUserRating(finalUserId);
+    } catch (e) {
+      console.warn("Failed to update user rating:", e);
+    }
+  }
+
   return {
     id: attemptId,
     quiz_id: quizId,
+    user_id: finalUserId,
     group_name: group,
     mode: mode || "exam",
     answers: typeof answers === "string" ? JSON.parse(answers) : answers,
@@ -436,7 +510,7 @@ export function saveAttempt({
   };
 }
 
-export function getAttempts({ quizId = null, testId = null, since = null, mode = null } = {}) {
+export function getAttempts({ quizId = null, testId = null, userId = null, since = null, mode = null } = {}) {
   const db = getDb();
   const targetId = quizId || testId;
   let query = "SELECT * FROM attempts WHERE 1=1";
@@ -445,6 +519,10 @@ export function getAttempts({ quizId = null, testId = null, since = null, mode =
   if (targetId) {
     query += " AND quiz_id = ?";
     params.push(targetId);
+  }
+  if (userId) {
+    query += " AND user_id = ?";
+    params.push(userId);
   }
   if (since) {
     query += " AND created_at >= ?";
@@ -461,6 +539,7 @@ export function getAttempts({ quizId = null, testId = null, since = null, mode =
     id: r.id,
     quiz_id: r.quiz_id,
     test_id: r.quiz_id,
+    user_id: r.user_id,
     group_name: r.group_name,
     user_name: r.group_name,
     mode: r.mode,
@@ -678,3 +757,469 @@ function syncColloquiumsToDisk(colloquiumId, contentDir = "content") {
     console.warn("Failed to sync colloquiums to disk:", err);
   }
 }
+
+// ==========================================
+// USER AUTH & REPOSITORY
+// ==========================================
+
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+export function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(":")) return false;
+  const [salt, key] = stored.split(":");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(key, "hex"));
+}
+
+export function createUser({ email, password, name, group_name, role = "student" }) {
+  const db = getDb();
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  const cleanName = String(name || "").trim();
+  const cleanGroup = String(group_name || "").trim().toUpperCase();
+
+  if (!cleanEmail || !password || !cleanName) {
+    throw new Error("Заполните все обязательные поля (email, пароль, имя)");
+  }
+
+  const existing = getUserByEmail(cleanEmail);
+  if (existing) {
+    throw new Error("Пользователь с таким email уже зарегистрирован");
+  }
+
+  const id = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const passwordHash = hashPassword(password);
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO users (id, email, password_hash, name, group_name, role, rating, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+  `);
+  stmt.run(id, cleanEmail, passwordHash, cleanName, cleanGroup, role, now, now);
+
+  return getUserById(id);
+}
+
+export function getUserByEmail(email) {
+  const db = getDb();
+  const stmt = db.prepare("SELECT * FROM users WHERE LOWER(email) = LOWER(?)");
+  return stmt.get(String(email).trim()) || null;
+}
+
+export function getUserById(id) {
+  const db = getDb();
+  const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
+  const u = stmt.get(String(id));
+  if (!u) return null;
+  const { password_hash, ...safeUser } = u;
+  return safeUser;
+}
+
+export function verifyUserCredentials(email, password) {
+  const user = getUserByEmail(email);
+  if (!user || !user.password_hash) return null;
+  if (!verifyPassword(password, user.password_hash)) return null;
+  const { password_hash, ...safeUser } = user;
+  return safeUser;
+}
+
+export function updateUserRating(userId) {
+  const db = getDb();
+  const user = getUserById(userId);
+  if (!user) return 0;
+
+  // Best exam attempts per test
+  const attempts = db.prepare(`
+    SELECT quiz_id, MAX(score * 100.0 / CASE WHEN max_score > 0 THEN max_score ELSE 1.0 END) as best_pct
+    FROM attempts
+    WHERE user_id = ? AND mode = 'exam'
+    GROUP BY quiz_id
+  `).all(userId);
+
+  let testRating = 0;
+  for (const a of attempts) {
+    testRating += Math.round(Number(a.best_pct || 0));
+  }
+
+  // Contest points: percentage * 1.5
+  const contests = db.prepare(`
+    SELECT SUM(percentage * 1.5) as contest_pts
+    FROM contest_submissions
+    WHERE user_id = ?
+  `).get(userId);
+
+  const contestPts = Math.round(Number(contests?.contest_pts || 0));
+  const totalRating = testRating + contestPts;
+
+  db.prepare("UPDATE users SET rating = ?, updated_at = ? WHERE id = ?").run(
+    totalRating,
+    new Date().toISOString(),
+    userId
+  );
+
+  return totalRating;
+}
+
+// ==========================================
+// LEADERBOARD & STUDENT PROFILE
+// ==========================================
+
+export function getLeaderboard({ group = null, limit = 100 } = {}) {
+  const db = getDb();
+  let query = `
+    SELECT id, email, name, group_name, role, rating, created_at
+    FROM users
+    WHERE role = 'student'
+  `;
+  const params = [];
+  if (group && group !== "all") {
+    query += " AND group_name = ?";
+    params.push(group);
+  }
+  query += " ORDER BY rating DESC, created_at ASC LIMIT ?";
+  params.push(limit);
+
+  const rows = db.prepare(query).all(...params);
+  return rows.map((u, index) => {
+    const statsRow = db.prepare(`
+      SELECT 
+        COUNT(DISTINCT quiz_id) as tests_solved,
+        AVG(score * 100.0 / CASE WHEN max_score > 0 THEN max_score ELSE 1.0 END) as avg_score
+      FROM attempts WHERE user_id = ? AND mode = 'exam'
+    `).get(u.id);
+
+    const contestRow = db.prepare(`
+      SELECT COUNT(*) as count FROM contest_submissions WHERE user_id = ?
+    `).get(u.id);
+
+    return {
+      rank: index + 1,
+      id: u.id,
+      name: u.name,
+      group_name: u.group_name,
+      rating: u.rating || 0,
+      tests_solved: statsRow?.tests_solved || 0,
+      avg_score: Math.round(statsRow?.avg_score || 0),
+      contests_count: contestRow?.count || 0,
+      badge: index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : null,
+    };
+  });
+}
+
+export function getStudentProfile(userId) {
+  const db = getDb();
+  const user = getUserById(userId);
+  if (!user) return null;
+
+  // Global rank
+  const rankRow = db.prepare(`
+    SELECT COUNT(*) + 1 as rank FROM users WHERE role = 'student' AND rating > ?
+  `).get(user.rating || 0);
+
+  // Group rank
+  const groupRankRow = user.group_name ? db.prepare(`
+    SELECT COUNT(*) + 1 as rank FROM users WHERE role = 'student' AND group_name = ? AND rating > ?
+  `).get(user.group_name, user.rating || 0) : null;
+
+  // Topics/tests progress
+  const allTests = getAllTests();
+  const topicProgress = allTests.map((t) => {
+    const best = db.prepare(`
+      SELECT score, max_score, duration_sec, created_at,
+             (score * 100.0 / CASE WHEN max_score > 0 THEN max_score ELSE 1.0 END) as pct
+      FROM attempts
+      WHERE user_id = ? AND quiz_id = ? AND mode = 'exam'
+      ORDER BY (score * 100.0 / CASE WHEN max_score > 0 THEN max_score ELSE 1.0 END) DESC, created_at DESC
+      LIMIT 1
+    `).get(userId, t.id);
+
+    const attemptCount = db.prepare(`
+      SELECT COUNT(*) as cnt FROM attempts WHERE user_id = ? AND quiz_id = ?
+    `).get(userId, t.id)?.cnt || 0;
+
+    return {
+      test_id: t.id,
+      title: t.title,
+      topic: t.topic,
+      order: t.order,
+      best_score: best ? best.score : 0,
+      max_score: best ? best.max_score : 0,
+      percentage: best ? Math.round(best.pct) : 0,
+      attempts_count: attemptCount,
+      passed: best ? best.pct >= 60 : false,
+      last_attempt_at: best?.created_at || null,
+    };
+  });
+
+  // Recent attempts
+  const recentAttempts = db.prepare(`
+    SELECT * FROM attempts WHERE user_id = ? ORDER BY created_at DESC LIMIT 15
+  `).all(userId).map((r) => ({
+    id: r.id,
+    quiz_id: r.quiz_id,
+    mode: r.mode,
+    score: r.score,
+    max_score: r.max_score,
+    percentage: Math.round(r.max_score > 0 ? (r.score / r.max_score) * 100 : 0),
+    duration_sec: r.duration_sec,
+    created_at: r.created_at,
+  }));
+
+  // Contest submissions
+  const contests = db.prepare(`
+    SELECT cs.*, c.title as contest_title
+    FROM contest_submissions cs
+    LEFT JOIN contests c ON cs.contest_id = c.id
+    WHERE cs.user_id = ?
+    ORDER BY cs.created_at DESC
+  `).all(userId);
+
+  return {
+    user,
+    rank: rankRow?.rank || 1,
+    group_rank: groupRankRow?.rank || 1,
+    topic_progress: topicProgress,
+    recent_attempts: recentAttempts,
+    contests,
+  };
+}
+
+// ==========================================
+// SESSIONS REPOSITORY
+// ==========================================
+
+export function createSession(userId, role = "student") {
+  const db = getDb();
+  const token = crypto.randomBytes(32).toString("hex");
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+
+  db.prepare(`
+    INSERT INTO sessions (token, user_id, role, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(token, userId, role, expiresAt, now);
+
+  return { token, userId, role, expiresAt };
+}
+
+export function getSessionByToken(token) {
+  if (!token) return null;
+  const db = getDb();
+  const sess = db.prepare("SELECT * FROM sessions WHERE token = ?").get(token);
+  if (!sess) return null;
+
+  if (new Date(sess.expires_at) < new Date()) {
+    db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+    return null;
+  }
+
+  let user = null;
+  if (sess.role === "admin") {
+    user = { id: "admin", name: "Преподаватель", role: "admin", email: "admin@itmo.ru" };
+  } else {
+    user = getUserById(sess.user_id);
+  }
+
+  return {
+    token: sess.token,
+    role: sess.role,
+    user,
+    expiresAt: sess.expires_at,
+  };
+}
+
+export function deleteSessionByToken(token) {
+  if (!token) return;
+  const db = getDb();
+  db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+}
+
+// ==========================================
+// CONTESTS REPOSITORY
+// ==========================================
+
+export function createContest({
+  id = null,
+  title,
+  test_id,
+  group_name = "all",
+  duration_minutes = 15,
+  starts_at = null,
+  ends_at = null,
+  status = "active",
+}) {
+  const db = getDb();
+  const contestId = id || `cnt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const now = starts_at || new Date().toISOString();
+  const dur = Number(duration_minutes || 15);
+  const end = ends_at || new Date(new Date(now).getTime() + dur * 60 * 1000).toISOString();
+
+  db.prepare(`
+    INSERT INTO contests (id, title, test_id, group_name, duration_minutes, starts_at, ends_at, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    contestId,
+    String(title || "Летучка").trim(),
+    String(test_id || "").trim(),
+    String(group_name || "all").trim(),
+    dur,
+    now,
+    end,
+    status || "active",
+    new Date().toISOString()
+  );
+
+  return getContestById(contestId);
+}
+
+export function getAllContests({ group_name = null } = {}) {
+  const db = getDb();
+  let query = "SELECT * FROM contests ORDER BY created_at DESC";
+  const params = [];
+  if (group_name && group_name !== "all") {
+    query = "SELECT * FROM contests WHERE group_name = 'all' OR group_name = ? ORDER BY created_at DESC";
+    params.push(group_name);
+  }
+
+  const rows = db.prepare(query).all(...params);
+  const now = new Date();
+
+  return rows.map((r) => {
+    let currentStatus = r.status;
+    if (currentStatus === "active" && r.ends_at && new Date(r.ends_at) < now) {
+      currentStatus = "finished";
+    }
+
+    const subsCount = db.prepare("SELECT COUNT(*) as cnt FROM contest_submissions WHERE contest_id = ?").get(r.id)?.cnt || 0;
+
+    return {
+      ...r,
+      status: currentStatus,
+      submissions_count: subsCount,
+    };
+  });
+}
+
+export function getContestById(id) {
+  const db = getDb();
+  const r = db.prepare("SELECT * FROM contests WHERE id = ?").get(id);
+  if (!r) return null;
+
+  let currentStatus = r.status;
+  if (currentStatus === "active" && r.ends_at && new Date(r.ends_at) < new Date()) {
+    currentStatus = "finished";
+  }
+
+  return {
+    ...r,
+    status: currentStatus,
+  };
+}
+
+export function updateContestStatus(id, status) {
+  const db = getDb();
+  db.prepare("UPDATE contests SET status = ? WHERE id = ?").run(status, id);
+  return getContestById(id);
+}
+
+export function deleteContest(id) {
+  const db = getDb();
+  db.prepare("DELETE FROM contest_submissions WHERE contest_id = ?").run(id);
+  db.prepare("DELETE FROM contests WHERE id = ?").run(id);
+  return true;
+}
+
+export function saveContestSubmission({
+  contest_id,
+  user_id,
+  user_name,
+  group_name,
+  score = 0,
+  max_score = 0,
+  duration_sec = 0,
+  answers = {},
+}) {
+  const db = getDb();
+  const subId = `csub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const finalScore = Number(score || 0);
+  const finalMaxScore = Number(max_score || 0);
+  const pct = finalMaxScore > 0 ? (finalScore / finalMaxScore) * 100 : 0;
+  const now = new Date().toISOString();
+
+  db.prepare("DELETE FROM contest_submissions WHERE contest_id = ? AND user_id = ?").run(contest_id, user_id);
+
+  db.prepare(`
+    INSERT INTO contest_submissions (id, contest_id, user_id, user_name, group_name, score, max_score, percentage, duration_sec, answers, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    subId,
+    contest_id,
+    user_id,
+    user_name || "Студент",
+    group_name || "",
+    finalScore,
+    finalMaxScore,
+    pct,
+    Number(duration_sec || 0),
+    typeof answers === "string" ? answers : JSON.stringify(answers || {}),
+    now
+  );
+
+  if (user_id) {
+    try {
+      updateUserRating(user_id);
+    } catch {}
+  }
+
+  return {
+    id: subId,
+    contest_id,
+    user_id,
+    user_name,
+    group_name,
+    score: finalScore,
+    max_score: finalMaxScore,
+    percentage: Math.round(pct),
+    duration_sec,
+    created_at: now,
+  };
+}
+
+export function getContestSubmissions(contest_id) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT * FROM contest_submissions
+    WHERE contest_id = ?
+    ORDER BY score DESC, duration_sec ASC, created_at ASC
+  `).all(contest_id);
+
+  return rows.map((r, idx) => ({
+    rank: idx + 1,
+    id: r.id,
+    contest_id: r.contest_id,
+    user_id: r.user_id,
+    user_name: r.user_name,
+    group_name: r.group_name,
+    score: r.score,
+    max_score: r.max_score,
+    percentage: Math.round(r.percentage),
+    duration_sec: r.duration_sec,
+    created_at: r.created_at,
+    badge: idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : null,
+  }));
+}
+
+export function getUserContestSubmission(contest_id, user_id) {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM contest_submissions WHERE contest_id = ? AND user_id = ?").get(contest_id, user_id);
+  if (!row) return null;
+  return {
+    ...row,
+    percentage: Math.round(row.percentage),
+    answers: row.answers ? (typeof row.answers === "string" ? JSON.parse(row.answers) : row.answers) : {},
+  };
+}
+

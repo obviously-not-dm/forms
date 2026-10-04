@@ -227,6 +227,13 @@ function renderAdmin() {
       onclick: () => { currentTab = "colloquiums"; renderAdmin(); },
     }, "🎓 Коллоквиумы"),
     el("button", {
+      class: `admin-nav-item ${currentTab === "contests" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "contests",
+      onclick: () => { currentTab = "contests"; renderAdmin(); },
+    }, "⏱️ Онлайн-контесты"),
+    el("button", {
       class: `admin-nav-item ${currentTab === "stats" ? "active" : ""}`,
       type: "button",
       role: "tab",
@@ -266,6 +273,8 @@ function renderAdmin() {
     notesTab(container);
   } else if (currentTab === "colloquiums") {
     colloquiumsTab(container);
+  } else if (currentTab === "contests") {
+    contestsTab(container);
   } else {
     testsTab(container);
   }
@@ -3083,6 +3092,253 @@ async function deleteColloquiumQuestionConfirm(id, onDeleted = null) {
   } catch (err) {
     alert(`Ошибка удаления: ${err.message}`);
   }
+}
+
+// ==========================================
+// 4. ВКЛАДКА: ОНЛАЙН-КОНТЕСТЫ И ЛЕТУЧКИ
+// ==========================================
+
+async function contestsTab(container) {
+  container.innerHTML = '<p class="muted">Загрузка контестов…</p>';
+
+  let tests = [];
+  try {
+    tests = await json("/api/tests");
+  } catch (e) {
+    console.warn("Failed to load tests for contests:", e);
+  }
+
+  let selectedContestId = null;
+  let liveInterval = null;
+
+  async function render() {
+    if (liveInterval) clearInterval(liveInterval);
+
+    let contests = [];
+    try {
+      contests = await json("/api/contests");
+    } catch (e) {
+      container.innerHTML = `<p class="field-error">Ошибка загрузки контестов: ${e.message}</p>`;
+      return;
+    }
+
+    // 1. Form to create a new contest
+    const testOptions = tests.map((t) => el("option", { value: t.id }, `${t.title} (${t.count} зад.)`));
+
+    const titleInput = el("input", {
+      type: "text",
+      placeholder: "Например: Летучка №1: Множества",
+      required: true,
+      style: "width: 100%;",
+    });
+
+    const testSelect = el("select", {
+      style: "width: 100%;",
+      onchange: () => {
+        const sel = tests.find((t) => t.id === testSelect.value);
+        if (sel && !titleInput.value) {
+          titleInput.value = `Летучка: ${sel.title}`;
+        }
+      },
+    },
+      el("option", { value: "" }, "— Выберите тест курса —"),
+      ...testOptions);
+
+    const groupSelect = el("select", { style: "width: 100%;" },
+      el("option", { value: "all" }, "Все группы курса"),
+      ...Array.from({ length: 15 }, (_, i) => {
+        const g = `M31${String(11 + i).padStart(2, "0")}`;
+        return el("option", { value: g }, `Группа ${g}`);
+      }));
+
+    const durationInput = el("input", {
+      type: "number",
+      value: "15",
+      min: "5",
+      max: "120",
+      style: "width: 100%;",
+    });
+
+    const formError = el("p", { class: "field-error", hidden: true });
+
+    const createForm = el("form", {
+      class: "admin-box",
+      style: "background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 2rem;",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        formError.hidden = true;
+        const title = titleInput.value.trim();
+        const testId = testSelect.value;
+        const group = groupSelect.value;
+        const dur = Number(durationInput.value) || 15;
+
+        if (!title || !testId) {
+          formError.textContent = "Заполните название и выберите тест.";
+          formError.hidden = false;
+          return;
+        }
+
+        try {
+          await json("/api/admin/contests", {
+            method: "POST",
+            body: { title, test_id: testId, group_name: group, duration_minutes: dur },
+          });
+          render();
+        } catch (err) {
+          formError.textContent = err.message;
+          formError.hidden = false;
+        }
+      },
+    },
+      el("h3", { style: "margin-top: 0; margin-bottom: 1rem; font-size: 1.15rem;" }, "🚀 Запустить онлайн-контест на паре"),
+      el("div", { class: "admin-form-grid", style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;" },
+        el("label", {}, el("span", { class: "field-label" }, "Название работы"), titleInput),
+        el("label", {}, el("span", { class: "field-label" }, "Тест курса"), testSelect),
+        el("label", {}, el("span", { class: "field-label" }, "Целевая группа"), groupSelect),
+        el("label", {}, el("span", { class: "field-label" }, "Таймер (минут)"), durationInput)),
+      formError,
+      el("button", { class: "btn primary", type: "submit" }, "⚡ Запустить контест для студентов"));
+
+    // 2. Contests list
+    const activeContests = contests.filter((c) => c.status === "active");
+    const finishedContests = contests.filter((c) => c.status === "finished");
+
+    const renderContestItem = (c) => {
+      const isLive = c.status === "active";
+      const isSelected = selectedContestId === c.id;
+
+      return el("div", {
+        class: `admin-contest-card ${isLive ? 'is-live' : ''} ${isSelected ? 'is-selected' : ''}`,
+        style: `padding: 1rem; border: 1px solid ${isSelected ? 'var(--accent)' : 'var(--line)'}; border-radius: var(--radius-md); background: ${isSelected ? 'var(--accent-soft)' : 'var(--surface)'}; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;`,
+      },
+        el("div", { style: "flex: 1; min-width: 250px;" },
+          el("div", { style: "display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;" },
+            el("span", {
+              class: `tag ${isLive ? 'tag-accent' : ''}`,
+              style: isLive ? 'background: #22c55e; color: #fff; font-weight: 700;' : '',
+            }, isLive ? "🟢 Идёт сейчас" : "⚪ Завершён"),
+            el("span", { style: "font-size: 0.8rem; color: var(--muted);" }, `ID: ${c.id}`)),
+          el("h4", { style: "margin: 0 0 0.25rem 0; font-size: 1.05rem;" }, c.title),
+          el("div", { style: "font-size: 0.84rem; color: var(--muted); display: flex; gap: 1rem; flex-wrap: wrap;" },
+            el("span", {}, "Группа: ", el("strong", {}, c.group_name === "all" ? "Все" : c.group_name)),
+            el("span", {}, "Время: ", el("strong", {}, `${c.duration_minutes} мин`)),
+            el("span", {}, "Сдали: ", el("strong", {}, `${c.submissions_count || 0} чел.`)))),
+        el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+          el("button", {
+            class: `btn ${isSelected ? 'primary' : 'quiet'} btn-sm`,
+            type: "button",
+            onclick: () => {
+              selectedContestId = c.id;
+              render();
+            },
+          }, isSelected ? "🏆 Смотрим Standings" : "🏆 Результаты"),
+          isLive ? el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            style: "color: #dc2626;",
+            onclick: async () => {
+              if (confirm(`Завершить приём ответов для «${c.title}»?`)) {
+                await json(`/api/admin/contests/${c.id}/stop`, { method: "PUT" });
+                render();
+              }
+            },
+          }, "🛑 Завершить") : null,
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: async () => {
+              if (confirm(`Удалить контест «${c.title}» и все его результаты?`)) {
+                await json(`/api/admin/contests/${c.id}`, { method: "DELETE" });
+                if (selectedContestId === c.id) selectedContestId = null;
+                render();
+              }
+            },
+          }, "🗑️")));
+    };
+
+    // 3. Standings viewer
+    let standingsBox = el("div", { class: "admin-standings-box" });
+    if (selectedContestId) {
+      const selectedContest = contests.find((c) => c.id === selectedContestId);
+      const isSelectedLive = selectedContest?.status === "active";
+
+      const standingsHeader = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;" },
+        el("h3", { style: "margin: 0;" }, `🏆 Турнирная таблица: ${selectedContest?.title || selectedContestId}`),
+        el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+          isSelectedLive ? el("span", { style: "font-size: 0.78rem; color: #22c55e; font-weight: 600;" }, "🔄 Автообновление каждые 5 сек") : null,
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: () => loadStandings(selectedContestId),
+          }, "Обновить")));
+
+      const standingsTableContainer = el("div", { id: "standings-table-container" },
+        el("p", { class: "muted" }, "Загружаем результаты студентов…"));
+
+      standingsBox.replaceChildren(
+        el("div", { style: "background: var(--surface); border: 2px solid var(--accent); border-radius: var(--radius-md); padding: 1.25rem; margin-top: 1.5rem;" },
+          standingsHeader,
+          standingsTableContainer));
+
+      const loadStandings = async (id) => {
+        try {
+          const res = await json(`/api/contests/${id}/standings`);
+          const rows = res.standings || [];
+          if (!rows.length) {
+            standingsTableContainer.innerHTML = '<p class="muted">Пока ни один студент не отправил решение.</p>';
+            return;
+          }
+
+          standingsTableContainer.innerHTML = `
+            <div class="table-responsive">
+              <table class="leaderboard-table" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 2px solid var(--line); text-align: left;">
+                    <th style="padding: 0.5rem;">#</th>
+                    <th style="padding: 0.5rem;">Студент</th>
+                    <th style="padding: 0.5rem;">Группа</th>
+                    <th style="padding: 0.5rem;">Баллы</th>
+                    <th style="padding: 0.5rem;">Процент</th>
+                    <th style="padding: 0.5rem;">Время решения</th>
+                    <th style="padding: 0.5rem;">Сдано</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.map((r, i) => `
+                    <tr style="border-bottom: 1px solid var(--line); background: ${i < 3 ? 'var(--sunken)' : 'transparent'};">
+                      <td style="padding: 0.5rem;"><strong>${r.badge || r.rank}</strong></td>
+                      <td style="padding: 0.5rem;"><strong>${r.user_name}</strong></td>
+                      <td style="padding: 0.5rem;"><span class="group-pill">${r.group_name || '—'}</span></td>
+                      <td style="padding: 0.5rem;"><strong>${r.score} / ${r.max_score}</strong></td>
+                      <td style="padding: 0.5rem;">${r.percentage}%</td>
+                      <td style="padding: 0.5rem;">${Math.round(r.duration_sec / 60)} мин ${r.duration_sec % 60} сек</td>
+                      <td style="padding: 0.5rem; font-size: 0.8rem; color: var(--muted);">${new Date(r.created_at).toLocaleTimeString("ru-RU")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `;
+        } catch (e) {
+          standingsTableContainer.innerHTML = `<p class="field-error">Ошибка: ${e.message}</p>`;
+        }
+      };
+
+      loadStandings(selectedContestId);
+
+      if (isSelectedLive) {
+        liveInterval = setInterval(() => loadStandings(selectedContestId), 5000);
+      }
+    }
+
+    container.replaceChildren(
+      createForm,
+      el("h3", { style: "margin: 1.5rem 0 0.75rem 0;" }, `Активные и недавние контесты (${contests.length})`),
+      contests.length ? el("div", {}, contests.map(renderContestItem)) : el("p", { class: "muted" }, "Контесты ещё не создавались."),
+      standingsBox);
+  }
+
+  render();
 }
 
 

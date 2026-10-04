@@ -765,6 +765,160 @@ test("Server REST API handles /api/auth login, session, and logout flow", async 
   assert.strictEqual(sS4.json.authenticated, false);
 });
 
+test("Platform: student auth, profile, rating, leaderboard, and contest flow", async () => {
+  const { handleApi } = await import("../src/server/api.mjs");
+  const { EventEmitter } = await import("node:events");
+
+  function mockReqRes(method, urlStr, body = null, headers = {}) {
+    const u = new URL(urlStr);
+    const req = new EventEmitter();
+    req.method = method;
+    req.url = u.pathname + u.search;
+    req.headers = { host: "localhost", ...headers };
+    const res = {
+      statusCode: 200,
+      headers: {},
+      writeHead(code, h) {
+        this.statusCode = code;
+        Object.assign(this.headers, h);
+      },
+      setHeader(k, v) {
+        this.headers[k] = v;
+      },
+      end(data) {
+        this.data = data;
+        this.json = data ? JSON.parse(data) : null;
+      },
+    };
+    Promise.resolve().then(() => {
+      if (body) req.emit("data", JSON.stringify(body));
+      req.emit("end");
+    });
+    return { req, res };
+  }
+
+  const randomSuffix = Math.random().toString(36).slice(2, 6);
+  const studentEmail = `ivan_${randomSuffix}@itmo.ru`;
+  const studentPassword = "secretpassword";
+  const studentName = "Иван Иванов";
+  const studentGroup = "M3115";
+
+  // 1. Student Registration
+  const { req: rReg, res: sReg } = mockReqRes("POST", "http://localhost/api/auth/register", {
+    email: studentEmail,
+    password: studentPassword,
+    name: studentName,
+    group: studentGroup,
+  });
+  await handleApi(rReg, sReg, "/api/auth/register");
+  assert.strictEqual(sReg.statusCode, 200);
+  assert.strictEqual(sReg.json.ok, true);
+  assert.ok(sReg.json.token);
+  assert.strictEqual(sReg.json.user.name, studentName);
+  assert.strictEqual(sReg.json.user.group_name, studentGroup);
+
+  const studentToken = sReg.json.token;
+  const studentId = sReg.json.user.id;
+
+  // 2. Student Profile Check
+  const { req: rProf, res: sProf } = mockReqRes("GET", "http://localhost/api/student/profile", null, {
+    cookie: `dm_session=${studentToken}`,
+  });
+  await handleApi(rProf, sProf, "/api/student/profile");
+  assert.strictEqual(sProf.statusCode, 200);
+  assert.strictEqual(sProf.json.user.id, studentId);
+  assert.ok(Array.isArray(sProf.json.topic_progress));
+  assert.strictEqual(sProf.json.user.rating, 0);
+
+  // 3. Student solves test (saves attempt with session)
+  const { req: rAtt, res: sAtt } = mockReqRes("POST", "http://localhost/api/attempts", {
+    quiz_id: "01-sets",
+    score: 10,
+    max_score: 10,
+    mode: "exam",
+    duration_sec: 120,
+  }, {
+    cookie: `dm_session=${studentToken}`,
+  });
+  await handleApi(rAtt, sAtt, "/api/attempts");
+  assert.strictEqual(sAtt.statusCode, 200);
+  assert.strictEqual(sAtt.json.ok, true);
+  assert.strictEqual(sAtt.json.attempt.user_id, studentId);
+
+  // 4. Check that rating was updated in profile
+  const { req: rProf2, res: sProf2 } = mockReqRes("GET", `http://localhost/api/student/profile?userId=${studentId}`);
+  await handleApi(rProf2, sProf2, "/api/student/profile");
+  assert.strictEqual(sProf2.statusCode, 200);
+  assert.strictEqual(sProf2.json.user.rating, 100); // 100% on test = 100 pts
+
+  // 5. Leaderboard contains student
+  const { req: rLead, res: sLead } = mockReqRes("GET", "http://localhost/api/leaderboard?group=M3115");
+  await handleApi(rLead, sLead, "/api/leaderboard");
+  assert.strictEqual(sLead.statusCode, 200);
+  assert.ok(Array.isArray(sLead.json));
+  const foundInLeaderboard = sLead.json.find((u) => u.id === studentId);
+  assert.ok(foundInLeaderboard);
+  assert.strictEqual(foundInLeaderboard.rating, 100);
+
+  // 6. Admin creates a contest
+  const { req: rAdmLog, res: sAdmLog } = mockReqRes("POST", "http://localhost/api/auth/login", {
+    login: "admin@itmo.ru",
+    password: "admin",
+  });
+  await handleApi(rAdmLog, sAdmLog, "/api/auth/login");
+  const adminToken = sAdmLog.json.token;
+
+  const { req: rCntCreate, res: sCntCreate } = mockReqRes("POST", "http://localhost/api/admin/contests", {
+    title: "Летучка на паре: Множества",
+    test_id: "01-sets",
+    group_name: "M3115",
+    duration_minutes: 10,
+  }, {
+    cookie: `dm_admin_session=${adminToken}`,
+  });
+  await handleApi(rCntCreate, sCntCreate, "/api/admin/contests");
+  assert.strictEqual(sCntCreate.statusCode, 200);
+  assert.ok(sCntCreate.json.contest.id);
+  const contestId = sCntCreate.json.contest.id;
+
+  // 7. Student lists contests and retrieves contest details
+  const { req: rCntList, res: sCntList } = mockReqRes("GET", "http://localhost/api/contests?group=M3115");
+  await handleApi(rCntList, sCntList, "/api/contests");
+  assert.strictEqual(sCntList.statusCode, 200);
+  assert.ok(sCntList.json.some((c) => c.id === contestId));
+
+  const { req: rCntGet, res: sCntGet } = mockReqRes("GET", `http://localhost/api/contests/${contestId}`);
+  await handleApi(rCntGet, sCntGet, `/api/contests/${contestId}`);
+  assert.strictEqual(sCntGet.statusCode, 200);
+  assert.strictEqual(sCntGet.json.title, "Летучка на паре: Множества");
+
+  // 8. Student submits contest answers
+  const { req: rCntSub, res: sCntSub } = mockReqRes("POST", `http://localhost/api/contests/${contestId}/submit`, {
+    answers: { "01": 0 },
+    duration_sec: 180,
+  }, {
+    cookie: `dm_session=${studentToken}`,
+  });
+  await handleApi(rCntSub, sCntSub, `/api/contests/${contestId}/submit`);
+  assert.strictEqual(sCntSub.statusCode, 200);
+  assert.strictEqual(sCntSub.json.ok, true);
+
+  // 9. Check standings for contest
+  const { req: rStand, res: sStand } = mockReqRes("GET", `http://localhost/api/contests/${contestId}/standings`);
+  await handleApi(rStand, sStand, `/api/contests/${contestId}/standings`);
+  assert.strictEqual(sStand.statusCode, 200);
+  assert.ok(sStand.json.standings.some((s) => s.user_id === studentId));
+
+  // 10. Admin stops contest
+  const { req: rStop, res: sStop } = mockReqRes("PUT", `http://localhost/api/admin/contests/${contestId}/stop`, null, {
+    cookie: `dm_admin_session=${adminToken}`,
+  });
+  await handleApi(rStop, sStop, `/api/admin/contests/${contestId}/stop`);
+  assert.strictEqual(sStop.statusCode, 200);
+  assert.strictEqual(sStop.json.contest.status, "finished");
+});
+
+
 
 
 

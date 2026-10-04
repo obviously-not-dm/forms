@@ -5,7 +5,20 @@ import { Marked } from "marked";
 import katex from "katex";
 import { isCorrect, guessCompare } from "../grade.js";
 import { escapeHtml as esc, renderMarkdown } from "./markdown.mjs";
-import { head, questionHtml, quizPage, notesPage, colloquiumsPage, indexPage, adminPage, tasksWord } from "./templates.mjs";
+import {
+  head,
+  questionHtml,
+  quizPage,
+  notesPage,
+  colloquiumsPage,
+  indexPage,
+  adminPage,
+  tasksWord,
+  leaderboardPage,
+  profilePage,
+  contestsPage,
+  contestRoomPage,
+} from "./templates.mjs";
 import { syncFromDisk, getAllNotes, getAllTests, getAllColloquiumQuestions } from "../server/db.mjs";
 
 const ROOT = path.resolve(".");
@@ -583,6 +596,20 @@ export function build() {
   fs.mkdirSync(colOut, { recursive: true });
   fs.writeFileSync(path.join(colOut, "index.html"), colloquiumsPage(renderedColloquiums, site));
   fs.writeFileSync(path.join(DIST, "colloquiums.json"), JSON.stringify(renderedColloquiums));
+
+  // Build leaderboard, profile, contests
+  const lbOut = path.join(DIST, "leaderboard");
+  fs.mkdirSync(lbOut, { recursive: true });
+  fs.writeFileSync(path.join(lbOut, "index.html"), leaderboardPage(site));
+
+  const profOut = path.join(DIST, "profile");
+  fs.mkdirSync(profOut, { recursive: true });
+  fs.writeFileSync(path.join(profOut, "index.html"), profilePage(site));
+
+  const cntOut = path.join(DIST, "contests");
+  fs.mkdirSync(cntOut, { recursive: true });
+  fs.writeFileSync(path.join(cntOut, "index.html"), contestsPage(site));
+  fs.writeFileSync(path.join(cntOut, "room.html"), contestRoomPage(site));
 
   // Build admin & home
   const visibleColloquiumsCount = renderedColloquiums.filter((c) => !c.hidden).length;
