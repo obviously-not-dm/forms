@@ -2,10 +2,19 @@
 import { isAnswered, isCorrect, LETTERS } from "./grade.js";
 
 async function initCustomTestRunner() {
+  document.body.classList.add("started");
+
   const params = new URLSearchParams(window.location.search);
   const count = Math.max(3, Math.min(50, Number(params.get("count")) || 10));
   const topic = params.get("topic") || "all";
   const mode = params.get("mode") || "exam";
+  let seed = params.get("seed");
+  if (!seed) {
+    seed = Math.random().toString(36).slice(2, 9);
+    const newUrl = new URL(window.location.href);
+    newUrl.searchParams.set("seed", seed);
+    window.history.replaceState({}, "", newUrl.href);
+  }
 
   const headingEl = document.getElementById("custom-heading");
   const leadEl = document.getElementById("custom-lead");
@@ -17,12 +26,16 @@ async function initCustomTestRunner() {
   const progressBar = document.getElementById("progress-bar");
   const submitBtn = document.getElementById("custom-submit-btn");
   const resultBox = document.getElementById("result");
+  const sheetMap = document.getElementById("sheet-map");
+  const mapOpenBtn = document.getElementById("map-open");
+  const mapGrid = document.getElementById("custom-map-grid");
 
   if (metaEl) {
-    metaEl.textContent = `${count} заданий · Тема: ${topic === "all" ? "Все темы (Микс)" : topic} · Режим: ${mode === "practice" ? "Тренировка" : "Экзамен"}`;
+    metaEl.textContent = `${count} заданий · Тема: ${topic === "all" ? "Все темы (Микс)" : topic} · Режим: ${mode === "practice" ? "Тренировка с разборами" : "Экзамен"}`;
   }
   if (totalCountEl) totalCountEl.textContent = count;
 
+  // 1. Загрузка общего пула заданий
   let pool = [];
   const candidateUrls = ["../pool.json", "/pool.json", "./pool.json", "pool.json"];
   let loadErr = null;
@@ -43,23 +56,25 @@ async function initCustomTestRunner() {
 
   if (!pool.length) {
     if (questionsWrap) {
-      questionsWrap.innerHTML = `<p class="table-error">Ошибка загрузки заданий: не удалось загрузить пул заданий курса. ${loadErr ? loadErr.message : ""}</p>`;
+      questionsWrap.innerHTML = `<p class="table-error">Ошибка загрузки заданий: не удалось загрузить банк вопросов курса. ${loadErr ? loadErr.message : ""}</p>`;
     }
     return;
   }
 
-  // Фильтрация по теме
+  // 2. Фильтрация пула по выбранной теме
   let candidateQuestions = topic === "all" ? pool : pool.filter((q) => q.topic === topic);
   if (!candidateQuestions.length) candidateQuestions = pool;
 
-  // Сохранение и восстановление выборки вопросов при перезагрузке
-  const sessionQuestionsKey = `trainer:custom_qids_${topic}_${count}`;
+  const getQKey = (q) => q.uid || `${q.testId}_${q.id}`;
+  const qMap = new Map(candidateQuestions.map((q) => [getQKey(q), q]));
+
+  // 3. Выборка заданий с привязкой к seed в URL (сохраняется при перезагрузке)
+  const sessionQuestionsKey = `trainer:custom_qids_${seed}_${topic}_${count}`;
   let selectedQuestions = [];
   try {
-    const savedIds = JSON.parse(localStorage.getItem(sessionQuestionsKey));
-    if (Array.isArray(savedIds) && savedIds.length === count) {
-      const idMap = new Map(candidateQuestions.map((q) => [q.id, q]));
-      selectedQuestions = savedIds.map((id) => idMap.get(id)).filter(Boolean);
+    const savedKeys = JSON.parse(localStorage.getItem(sessionQuestionsKey));
+    if (Array.isArray(savedKeys) && savedKeys.length === count) {
+      selectedQuestions = savedKeys.map((k) => qMap.get(k)).filter(Boolean);
     }
   } catch {}
 
@@ -67,34 +82,35 @@ async function initCustomTestRunner() {
     const shuffled = [...candidateQuestions].sort(() => Math.random() - 0.5);
     selectedQuestions = shuffled.slice(0, count);
     try {
-      localStorage.setItem(sessionQuestionsKey, JSON.stringify(selectedQuestions.map((q) => q.id)));
+      localStorage.setItem(sessionQuestionsKey, JSON.stringify(selectedQuestions.map(getQKey)));
     } catch {}
   }
 
-  // Хранилище ответов
-  const storeKey = "trainer:custom_test_session";
+  // 4. Загрузка сохранённых ответов
+  const storeKey = `trainer:custom_answers_${seed}`;
   let userAnswers = {};
   try {
     userAnswers = JSON.parse(localStorage.getItem(storeKey)) || {};
   } catch {}
 
-  // Рендер вопросов
+  // 5. Рендеринг заданий
   questionsWrap.innerHTML = selectedQuestions.map((q, idx) => {
     const num = idx + 1;
+    const qKey = getQKey(q);
     let answerHtml = "";
 
     if (q.type === "text") {
-      const savedVal = userAnswers[q.id] || "";
+      const savedVal = userAnswers[qKey] || "";
       answerHtml = `
         <div class="answer-field">
-          <input class="text-input" type="text" autocomplete="off" spellcheck="false"
+          <input class="text-input" type="text" name="custom-q-${qKey}" autocomplete="off" spellcheck="false"
                  placeholder="Введите ответ" value="${escapeHtml(savedVal)}">
         </div>
       `;
     } else {
       const isMultiple = q.type === "multiple";
       const inputType = isMultiple ? "checkbox" : "radio";
-      const saved = userAnswers[q.id];
+      const saved = userAnswers[qKey];
 
       const optsHtml = (q.options || []).map((opt, oIdx) => {
         const isChecked = isMultiple
@@ -104,7 +120,7 @@ async function initCustomTestRunner() {
 
         return `
           <label class="opt">
-            <input type="${inputType}" name="q-${q.id}" value="${oIdx}" ${isChecked ? "checked" : ""}>
+            <input type="${inputType}" name="custom-q-${qKey}" value="${oIdx}" ${isChecked ? "checked" : ""}>
             <span class="badge">${letter}</span>
             <div class="opt-body">${opt.html || opt.md || ""}</div>
           </label>
@@ -114,13 +130,23 @@ async function initCustomTestRunner() {
       answerHtml = `<div class="options ${isMultiple ? "multiple" : "single"}">${optsHtml}</div>`;
     }
 
+    const practiceControls = mode === "practice" ? `
+      <button class="btn quiet practice-check-btn" type="button" data-key="${qKey}">
+        💡 Проверить
+      </button>
+    ` : "";
+
     return `
-      <article class="q" id="q-${q.id}" data-id="${q.id}" data-type="${q.type}" data-idx="${idx}">
+      <article class="q" id="q-${qKey}" data-key="${qKey}" data-type="${q.type}" data-idx="${idx}">
         <div class="q-num">${num}</div>
         <div class="q-body">
+          <div class="q-source-tag" style="font-size: 0.78rem; color: var(--muted); margin-bottom: 0.35rem;">
+            📌 Раздел: <strong>${escapeHtml(q.topic || q.testTitle)}</strong>
+          </div>
           <div class="q-text">${q.html}</div>
           ${answerHtml}
           <div class="q-tools">
+            ${practiceControls}
             <button class="btn quiet favorite-btn" type="button" data-q-id="${q.id}" data-test-id="${q.testId}">
               ⭐ В избранное
             </button>
@@ -134,45 +160,73 @@ async function initCustomTestRunner() {
 
   if (finishSection) finishSection.hidden = false;
 
-  // KaTeX рендер
-  if (window.renderMathInElement) {
-    window.renderMathInElement(questionsWrap);
+  // 6. Карта заданий
+  if (mapGrid) {
+    mapGrid.innerHTML = selectedQuestions.map((q, idx) => {
+      const qKey = getQKey(q);
+      return `<button type="button" class="btn quiet btn-sm map-item-btn" data-go="${qKey}">${idx + 1}</button>`;
+    }).join("");
+
+    mapGrid.querySelectorAll("[data-go]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.go;
+        const target = document.getElementById(`q-${k}`);
+        if (target) {
+          if (sheetMap && sheetMap.open) sheetMap.close();
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      });
+    });
   }
 
-  // Прогресс
+  if (mapOpenBtn && sheetMap) {
+    mapOpenBtn.addEventListener("click", () => sheetMap.showModal());
+    sheetMap.addEventListener("click", (e) => {
+      if (e.target === sheetMap || e.target.closest("[data-close]")) {
+        sheetMap.close();
+      }
+    });
+  }
+
+  // 7. Обновление прогресса
   function updateProgress() {
     let answered = 0;
     const articles = questionsWrap.querySelectorAll("article.q");
     articles.forEach((art) => {
-      const qId = art.dataset.id;
+      const qKey = art.dataset.key;
       const type = art.dataset.type;
-      const val = userAnswers[qId];
+      const val = userAnswers[qKey];
       const isQDone = isAnswered(type, val);
       art.classList.toggle("is-answered", isQDone);
       if (isQDone) answered++;
+
+      const mapBtn = mapGrid?.querySelector(`[data-go="${qKey}"]`);
+      if (mapBtn) {
+        mapBtn.classList.toggle("primary", isQDone);
+      }
     });
 
     if (answeredCountEl) answeredCountEl.textContent = answered;
     if (progressBar) progressBar.style.width = `${(answered / count) * 100}%`;
   }
 
-  // Сбор ответов
+  // 8. Сбор ответов
   function collectAnswers() {
     questionsWrap.querySelectorAll("article.q").forEach((art) => {
-      const qId = art.dataset.id;
+      const qKey = art.dataset.key;
       const type = art.dataset.type;
       if (type === "text") {
         const inp = art.querySelector(".text-input");
-        if (inp && inp.value.trim() !== "") userAnswers[qId] = inp.value.trim();
-        else delete userAnswers[qId];
+        if (inp && inp.value.trim() !== "") userAnswers[qKey] = inp.value.trim();
+        else delete userAnswers[qKey];
       } else if (type === "single") {
-        const checked = art.querySelector("input[type=radio]:checked");
-        if (checked) userAnswers[qId] = Number(checked.value);
-        else delete userAnswers[qId];
+        const checked = art.querySelector(`input[name="custom-q-${qKey}"]:checked`);
+        if (checked) userAnswers[qKey] = Number(checked.value);
+        else delete userAnswers[qKey];
       } else if (type === "multiple") {
-        const checked = Array.from(art.querySelectorAll("input[type=checkbox]:checked")).map((cb) => Number(cb.value));
-        if (checked.length) userAnswers[qId] = checked;
-        else delete userAnswers[qId];
+        const checked = Array.from(art.querySelectorAll(`input[name="custom-q-${qKey}"]:checked`)).map((cb) => Number(cb.value));
+        if (checked.length) userAnswers[qKey] = checked;
+        else delete userAnswers[qKey];
       }
     });
 
@@ -186,21 +240,73 @@ async function initCustomTestRunner() {
   questionsWrap.addEventListener("change", collectAnswers);
   window.addEventListener("beforeunload", collectAnswers);
 
-  // Очистка ответа
+  // 9. Очистка ответа
   questionsWrap.querySelectorAll(".clear-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const art = btn.closest("article.q");
-      const qId = art.dataset.id;
-      delete userAnswers[qId];
+      const qKey = art.dataset.key;
+      delete userAnswers[qKey];
       art.querySelectorAll("input").forEach((inp) => {
         if (inp.type === "text") inp.value = "";
         else inp.checked = false;
       });
+      const rev = art.querySelector(".review");
+      if (rev) rev.hidden = true;
+      art.classList.remove("is-right", "is-wrong");
       collectAnswers();
     });
   });
 
-  // Избранное
+  // 10. Проверка в режиме тренировки
+  function gradeQuestion(q, userVal) {
+    if (q.key) return isCorrect(q.key, userVal);
+    if (q.options) {
+      const correctIdxs = q.options.map((o, i) => o.correct ? i : null).filter((x) => x !== null);
+      if (q.type === "single") return correctIdxs[0] === userVal;
+      if (q.type === "multiple" && Array.isArray(userVal)) {
+        return [...correctIdxs].sort().join() === [...userVal].sort().join();
+      }
+    }
+    return false;
+  }
+
+  questionsWrap.querySelectorAll(".practice-check-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const qKey = btn.dataset.key;
+      const art = document.getElementById(`q-${qKey}`);
+      if (!art) return;
+      const q = selectedQuestions.find((item) => getQKey(item) === qKey);
+      if (!q) return;
+
+      collectAnswers();
+      const userVal = userAnswers[qKey];
+      if (userVal === undefined || userVal === null || userVal === "") {
+        alert("Сначала укажите ответ к этому заданию.");
+        return;
+      }
+
+      const correct = gradeQuestion(q, userVal);
+      art.classList.toggle("is-right", correct);
+      art.classList.toggle("is-wrong", !correct);
+
+      const rev = art.querySelector(".review");
+      if (rev) {
+        rev.hidden = false;
+        let hintsStr = "";
+        if (Array.isArray(q.hintsHtml) && q.hintsHtml.length > 0) {
+          hintsStr = `<div class="hints-box" style="margin-top: 0.5rem; font-size: 0.9rem; background: var(--surface-subtle); padding: 0.75rem; border-radius: 6px;">💡 <strong>Пояснение:</strong> ${q.hintsHtml.join("<hr>")}</div>`;
+        }
+        rev.innerHTML = `
+          <p class="feedback-msg ${correct ? 'ok' : 'bad'}" style="margin: 0.5rem 0 0.25rem;">
+            ${correct ? '✅ Верно!' : '❌ Неверно.'}
+          </p>
+          ${hintsStr}
+        `;
+      }
+    });
+  });
+
+  // 11. Избранное
   const favoritesKey = "trainer:favorites";
   function updateFavoriteButtons() {
     const favs = JSON.parse(localStorage.getItem(favoritesKey) || "{}");
@@ -231,40 +337,49 @@ async function initCustomTestRunner() {
   updateFavoriteButtons();
   updateProgress();
 
-  // Завершение и проверка
+  // 12. Финальная проверка теста
   if (submitBtn) {
     submitBtn.addEventListener("click", async () => {
       collectAnswers();
       submitBtn.disabled = true;
 
-      // Проверка ключей
       let score = 0;
       selectedQuestions.forEach((q) => {
-        const art = questionsWrap.querySelector(`article.q[data-id="${q.id}"]`);
-        const userVal = userAnswers[q.id];
-        let correct = false;
-
-        if (q.key) {
-          correct = isCorrect(q.key, userVal);
-        } else if (q.options) {
-          const correctIdxs = q.options.map((o, i) => o.correct ? i : null).filter((x) => x !== null);
-          if (q.type === "single") correct = correctIdxs[0] === userVal;
-          else if (q.type === "multiple" && Array.isArray(userVal)) {
-            correct = [...correctIdxs].sort().join() === [...userVal].sort().join();
-          }
-        }
+        const qKey = getQKey(q);
+        const art = document.getElementById(`q-${qKey}`);
+        const userVal = userAnswers[qKey];
+        const correct = gradeQuestion(q, userVal);
 
         if (correct) {
           score++;
-          art.classList.add("is-right");
-        } else {
+          if (art) {
+            art.classList.add("is-right");
+            art.classList.remove("is-wrong");
+          }
+        } else if (art) {
           art.classList.add("is-wrong");
+          art.classList.remove("is-right");
         }
 
-        const rev = art.querySelector(".review");
+        const rev = art?.querySelector(".review");
         if (rev) {
           rev.hidden = false;
-          rev.innerHTML = `<p class="feedback-msg ${correct ? 'ok' : 'bad'}">${correct ? '✅ Верно!' : '❌ Неверно.'}</p>`;
+          let hintsStr = "";
+          if (Array.isArray(q.hintsHtml) && q.hintsHtml.length > 0) {
+            hintsStr = `<div class="hints-box" style="margin-top: 0.5rem; font-size: 0.9rem; background: var(--surface-subtle); padding: 0.75rem; border-radius: 6px;">💡 <strong>Разбор задания:</strong> ${q.hintsHtml.join("<hr>")}</div>`;
+          }
+          rev.innerHTML = `
+            <p class="feedback-msg ${correct ? 'ok' : 'bad'}" style="margin: 0.5rem 0 0.25rem;">
+              ${correct ? '✅ Верно!' : '❌ Неверно.'}
+            </p>
+            ${hintsStr}
+          `;
+        }
+
+        const mapBtn = mapGrid?.querySelector(`[data-go="${qKey}"]`);
+        if (mapBtn) {
+          mapBtn.style.background = correct ? '#22c55e' : '#ef4444';
+          mapBtn.style.color = '#fff';
         }
       });
 
@@ -272,13 +387,25 @@ async function initCustomTestRunner() {
       if (resultBox) {
         resultBox.hidden = false;
         resultBox.innerHTML = `
-          <div class="result-score">Ваш результат: <strong>${score} из ${count}</strong> (${pct}%)</div>
-          <p class="muted">${pct >= 80 ? '🎉 Отличный результат!' : pct >= 60 ? '👍 Зачётный результат.' : '💡 Рекомендуем повторить теорию и попробовать снова.'}</p>
-          <div style="display: flex; gap: 0.5rem; justify-content: center; margin-top: 1rem;">
-            <button class="btn primary" onclick="window.location.reload()">Сгенерировать новый вариант</button>
-            <a href="./" class="btn quiet">Все тренажёры</a>
+          <div class="result-score" style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.5rem;">
+            Ваш результат: <strong>${score} из ${count}</strong> (${pct}%)
+          </div>
+          <p class="muted" style="margin: 0 0 1rem;">
+            ${pct >= 80 ? '🎉 Отличный результат! Курс усвоен на высоком уровне.' : pct >= 60 ? '👍 Зачётный результат. Рекомендуем повторить ошибки.' : '💡 Рекомендуем повторить теорию в конспектах и попробовать снова.'}
+          </p>
+          <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+            <button class="btn primary" id="btn-regen-variant" type="button">🔄 Сгенерировать новый вариант</button>
+            <a href="./" class="btn quiet">📋 Каталог всех тестов</a>
           </div>
         `;
+
+        document.getElementById("btn-regen-variant")?.addEventListener("click", () => {
+          const newSeed = Math.random().toString(36).slice(2, 9);
+          const u = new URL(window.location.href);
+          u.searchParams.set("seed", newSeed);
+          window.location.href = u.href;
+        });
+
         resultBox.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 

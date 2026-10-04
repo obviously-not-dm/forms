@@ -223,18 +223,28 @@ textarea { resize: vertical; }
 .start .btn.primary { justify-self: start; padding: 0.85rem 2.2rem; font-size: 1.02rem; }
 
 /* До нажатия кнопки «Начать тестирование» вопросы и сайдбар скрыты */
-body.quiz:not(.started) .questions,
-body.quiz:not(.started) .quiz-sidebar,
-body.quiz:not(.started) .mode-bar,
-body.quiz:not(.started) .finish-section,
-body.quiz:not(.started) .feedback,
-body.quiz:not(.started) .quiz-subtopbar .topbar-count,
-body.quiz:not(.started) .quiz-subtopbar .progress {
+body.quiz:not(.started):not(.custom-test-body) .questions,
+body.quiz:not(.started):not(.custom-test-body) .quiz-sidebar,
+body.quiz:not(.started):not(.custom-test-body) .mode-bar,
+body.quiz:not(.started):not(.custom-test-body) .finish-section,
+body.quiz:not(.started):not(.custom-test-body) .feedback,
+body.quiz:not(.started):not(.custom-test-body) .quiz-subtopbar .topbar-count,
+body.quiz:not(.started):not(.custom-test-body) .quiz-subtopbar .progress {
   display: none !important;
 }
 
 body.quiz.started #start {
   display: none !important;
+}
+
+body.custom-test-body .questions,
+body.custom-test-body .finish-section,
+body.custom-test-body .quiz-subtopbar .topbar-count,
+body.custom-test-body .quiz-subtopbar .progress {
+  display: block !important;
+}
+body.custom-test-body .quiz-subtopbar .topbar-count {
+  display: inline-flex !important;
 }
 
 /* ---------- задание ---------- */

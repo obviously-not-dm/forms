@@ -871,8 +871,8 @@ export function testsPage(tests = [], site = {}) {
 }
 
 export function customTestPage(site = {}) {
-  return `${head("Сгенерированный тест — Дискретная математика", "../", "", true)}
-<body class="quiz platform-body custom-test-body">
+  return `${head("Сгенерированный тест — Дискретная математика", "../", '<script defer src="../assets/katex/katex.min.js"></script>', true)}
+<body class="quiz platform-body custom-test-body started">
   ${navbarHtml("../", "tests", site)}
   <header class="quiz-subtopbar">
     <div class="quiz-subtopbar-inner">
@@ -913,6 +913,16 @@ export function customTestPage(site = {}) {
       </section>
     </main>
   </div>
+
+  <dialog id="sheet-map" class="map-dialog">
+    <div class="map-box" style="padding: 1.25rem; max-width: 480px; width: 90vw; background: var(--surface); border-radius: var(--radius-md); border: 1px solid var(--line);">
+      <div class="map-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+        <h3 style="margin: 0; font-size: 1.1rem;">🗺️ Карта заданий варианта</h3>
+        <button type="button" class="btn quiet btn-sm" data-close aria-label="Закрыть">✕</button>
+      </div>
+      <div class="map-grid" id="custom-map-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 0.5rem; margin-top: 0.75rem;"></div>
+    </div>
+  </dialog>
 
   ${authModalHtml(site)}
   <script type="module" src="../js/platform.js"></script>

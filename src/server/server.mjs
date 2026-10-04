@@ -63,6 +63,10 @@ export function serve(options = {}) {
     }
 
     if (fs.existsSync(file) && fs.statSync(file).isDirectory()) {
+      if (!url.pathname.endsWith("/")) {
+        res.writeHead(301, { Location: `${url.pathname}/${url.search || ""}` }).end();
+        return;
+      }
       file = path.join(file, "index.html");
     }
 

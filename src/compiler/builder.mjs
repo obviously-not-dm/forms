@@ -621,19 +621,33 @@ export function build() {
 
   // Build global questions pool for random generator
   const allQuestionsPool = tests.filter((t) => !t.meta.hidden).flatMap((t) =>
-    (t.sections || []).flatMap((s) => (s.questions || []).map((q) => ({
-      testId: t.id,
-      testTitle: t.meta.title || t.id,
-      topic: t.meta.topic || "Общее",
-      section: s.title || "",
-      id: q.id,
-      n: q.n,
-      type: q.type,
-      html: q.html,
-      options: q.options || [],
-      hintsHtml: q.hintsHtml || [],
-      key: q.key || null,
-    })))
+    (t.sections || []).flatMap((s) => (s.questions || []).map((q) => {
+      let fixedHtml = q.html || "";
+      fixedHtml = fixedHtml.replace(/<img([^>]+)src=["'](?!https?:\/\/|\/|\.\.\/)([^"']+)["']/gi, (match, prefix, src) => {
+        return `<img${prefix}src="../${t.id}/${src}"`;
+      });
+
+      const options = (q.options || []).map((o, idx) => ({
+        ...o,
+        html: q.optionsHtml?.[idx] || o.html || o.md || "",
+      }));
+
+      return {
+        uid: `${t.id}_${q.id}`,
+        testId: t.id,
+        testTitle: t.meta.title || t.id,
+        topic: t.meta.topic || "Общее",
+        section: s.title || "",
+        id: q.id,
+        n: q.n,
+        type: q.type,
+        html: fixedHtml,
+        options,
+        optionsHtml: q.optionsHtml || [],
+        hintsHtml: q.hintsHtml || [],
+        key: q.key || null,
+      };
+    }))
   );
   fs.writeFileSync(path.join(DIST, "pool.json"), JSON.stringify(allQuestionsPool));
   const distTestsDir = path.join(DIST, "tests");

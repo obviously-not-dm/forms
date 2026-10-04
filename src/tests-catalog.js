@@ -51,9 +51,19 @@ function initCatalog() {
     btnStartGen.addEventListener("click", () => {
       const topicSelect = document.getElementById("gen-topic-select");
       const topic = topicSelect?.value || "all";
-      const targetBase = window.location.pathname.endsWith("/") ? window.location.pathname : `${window.location.pathname}/`;
-      const url = `${targetBase}custom.html?count=${selectedCount}&topic=${encodeURIComponent(topic)}&mode=${selectedMode}`;
-      window.location.href = url;
+      const seed = Math.random().toString(36).slice(2, 9);
+      let base = window.location.href.split("?")[0].split("#")[0];
+      if (base.endsWith("/index.html")) {
+        base = base.slice(0, -"index.html".length);
+      } else if (!base.endsWith("/")) {
+        base = base + "/";
+      }
+      const u = new URL("custom.html", base);
+      u.searchParams.set("count", String(selectedCount));
+      u.searchParams.set("topic", topic);
+      u.searchParams.set("mode", selectedMode);
+      u.searchParams.set("seed", seed);
+      window.location.href = u.href;
     });
   }
 
