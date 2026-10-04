@@ -55,3 +55,38 @@ create policy "admins see admins" on public.admins
 revoke all on public.attempts from anon;
 grant insert on public.attempts to anon;
 revoke all on public.admins from anon;
+
+-- Таблица тестов (для хранения и редактирования тестов в облаке)
+create table if not exists public.quizzes (
+  id              text primary key check (id ~ '^[A-Za-z0-9_-]{1,64}$'),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  title           text not null check (char_length(title) <= 255),
+  description     text,
+  feedback_prompt text check (char_length(feedback_prompt) <= 255),
+  sort_order      int default 0,
+  hidden          boolean not null default false,
+  content_md      text not null,
+  schema_json     jsonb
+);
+
+alter table public.quizzes enable row level security;
+
+drop policy if exists "anyone can read public quizzes" on public.quizzes;
+create policy "anyone can read public quizzes" on public.quizzes
+  for select to anon, authenticated using (not hidden or public.is_admin());
+
+drop policy if exists "admins insert quizzes" on public.quizzes;
+create policy "admins insert quizzes" on public.quizzes
+  for insert to authenticated with check (public.is_admin());
+
+drop policy if exists "admins update quizzes" on public.quizzes;
+create policy "admins update quizzes" on public.quizzes
+  for update to authenticated using (public.is_admin()) with check (public.is_admin());
+
+drop policy if exists "admins delete quizzes" on public.quizzes;
+create policy "admins delete quizzes" on public.quizzes
+  for delete to authenticated using (public.is_admin());
+
+grant select on public.quizzes to anon, authenticated;
+grant insert, update, delete on public.quizzes to authenticated;

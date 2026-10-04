@@ -3,82 +3,389 @@ import { db } from "./db.js";
 
 const root = document.getElementById("app");
 let client;
+let currentTab = "tests"; // "tests" | "notes" | "colloquiums" | "stats"
+let currentUser = null;
 
 function el(tag, attrs = {}, ...children) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === null || v === undefined || v === false) continue;
-    if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
-    else if (k === "class") n.className = v;
-    else n.setAttribute(k, v === true ? "" : v);
+    if (k.startsWith("on")) {
+      n.addEventListener(k.slice(2), v);
+    } else if (k === "class") {
+      n.className = v;
+    } else if (k === "value") {
+      const s = String(v).trim();
+      const clean = (s === "null" || s === "undefined") ? "" : String(v);
+      n.value = clean;
+      n.setAttribute("value", clean);
+    } else {
+      const s = String(v).trim();
+      const clean = (s === "null" || s === "undefined") ? "" : v;
+      n.setAttribute(k, clean === true ? "" : clean);
+    }
   }
   for (const c of children.flat()) {
-    if (c !== null && c !== undefined && c !== false) n.append(c instanceof Node ? c : String(c));
+    if (c === null || c === undefined || c === false) continue;
+    const str = (c instanceof Node) ? null : String(c);
+    if (str !== null && (str.trim() === "null" || str.trim() === "undefined")) continue;
+    n.append(c instanceof Node ? c : str);
   }
   return n;
 }
 
-async function json(path) {
-  const r = await fetch(path, { cache: "no-cache" });
-  if (!r.ok) throw new Error(`${path}: ${r.status}`);
+async function json(path, options = {}) {
+  const opts = { cache: "no-cache", ...options };
+  if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+    opts.headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+    opts.body = JSON.stringify(opts.body);
+  }
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let msg = `${path}: ${r.status}`;
+    try {
+      const err = await r.json();
+      if (err.error) msg = err.error;
+    } catch {}
+    throw new Error(msg);
+  }
   return r.json();
+}
+
+function openPreviewModal(url, title = "Предпросмотр") {
+  let dlg = document.getElementById("admin-preview-dialog");
+  if (!dlg) {
+    dlg = el("dialog", { class: "admin-preview-dialog", id: "admin-preview-dialog" });
+    document.body.append(dlg);
+  }
+
+  dlg.replaceChildren(
+    el("div", { class: "admin-preview-container" },
+      el("div", { class: "admin-preview-header" },
+        el("div", { class: "admin-preview-title" }, `👁️ Предпросмотр: ${title}`),
+        el("div", { class: "admin-preview-actions" },
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: () => dlg.close(),
+          }, "✕ Закрыть"))),
+      el("iframe", {
+        class: "admin-preview-frame",
+        src: url,
+        title: title,
+      }))
+  );
+
+  dlg.showModal();
 }
 
 main();
 
-async function main() {
-  client = await db();
-  if (!client) {
-    root.replaceChildren(el("h1", {}, "Статистика"),
-      el("p", {}, "Supabase не настроен: заполните supabase в content/site.yml и пересоберите сайт."));
-    return;
+async function checkAuthSession() {
+  try {
+    const res = await json("/api/auth/session");
+    if (res && res.authenticated) {
+      currentUser = res.user || { login: "admin@itmo.ru" };
+      return true;
+    }
+  } catch (e) {
+    console.warn("Session check failed:", e);
   }
-  const { data } = await client.auth.getSession();
-  data.session ? dashboard() : login();
+  if (client) {
+    try {
+      const { data, error } = await client.auth.getSession();
+      if (!error && data?.session) {
+        currentUser = { login: data.session.user.email || "admin", provider: "supabase" };
+        return true;
+      }
+    } catch {}
+  }
+  return false;
 }
 
+async function main() {
+  try {
+    client = await db();
+  } catch (e) {
+    console.warn("DB init error:", e);
+    client = null;
+  }
+
+  const authed = await checkAuthSession();
+  if (authed) {
+    renderAdmin();
+  } else {
+    login();
+  }
+}
+
+// ---------- центрированный экран входа ----------
+
 function login() {
-  const email = el("input", { type: "text", autocomplete: "username", inputmode: "email" });
-  const password = el("input", { type: "password", autocomplete: "current-password" });
-  const status = el("p", { class: "field-error" });
+  const email = el("input", {
+    type: "text",
+    autocomplete: "username",
+    inputmode: "email",
+    placeholder: "admin@itmo.ru",
+    value: "admin@itmo.ru",
+  });
+  const password = el("input", {
+    type: "password",
+    autocomplete: "current-password",
+    placeholder: "••••••••",
+  });
+  const status = el("p", { class: "field-error", style: "margin: 0.5rem 0;" });
+
   const form = el("form", {
-    class: "login",
+    class: "login-card",
     onsubmit: async (e) => {
       e.preventDefault();
       status.textContent = "";
-      const { error } = await client.auth.signInWithPassword({ email: email.value.trim(), password: password.value });
-      if (error) status.textContent = "Неверная почта или пароль.";
-      else dashboard();
+      const userVal = email.value.trim();
+      const passVal = password.value;
+      if (!userVal || !passVal) {
+        status.textContent = "Пожалуйста, введите логин и пароль администратора.";
+        return;
+      }
+
+      try {
+        const res = await json("/api/auth/login", {
+          method: "POST",
+          body: { login: userVal, password: passVal },
+        });
+        if (res.ok) {
+          currentUser = res.user || { login: userVal };
+          renderAdmin();
+          return;
+        }
+      } catch (err) {
+        if (client) {
+          try {
+            const { data, error } = await client.auth.signInWithPassword({ email: userVal, password: passVal });
+            if (!error && data?.session) {
+              currentUser = { login: data.session.user.email, provider: "supabase" };
+              renderAdmin();
+              return;
+            }
+          } catch {}
+        }
+        status.textContent = "Неверный логин или пароль администратора.";
+      }
     },
   },
-    el("label", {}, el("span", { class: "field-label" }, "Почта"), email),
+    el("label", {}, el("span", { class: "field-label" }, "Логин или почта администратора"), email),
     el("label", {}, el("span", { class: "field-label" }, "Пароль"), password),
+    el("div", {
+      class: "login-hint",
+      style: "font-size: 0.82rem; color: var(--muted); margin: 0.6rem 0; background: var(--sunken); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--line); line-height: 1.45;",
+    },
+      el("div", { style: "font-weight: 600; color: var(--ink); margin-bottom: 0.2rem;" }, "Данные для входа по умолчанию:"),
+      el("div", {}, "Логин: ", el("code", {}, "admin@itmo.ru"), " (или ", el("code", {}, "admin"), ")"),
+      el("div", {}, "Пароль: ", el("code", {}, "admin")),
+      el("div", { style: "margin-top: 0.3rem; font-size: 0.75rem; opacity: 0.85;" }, "Для сервера настраивается в docker-compose.yml через ADMIN_USER и ADMIN_PASSWORD.")),
     status,
-    el("button", { class: "btn primary", type: "submit" }, "Войти"));
-  root.replaceChildren(el("section", { class: "intro" }, el("h1", {}, "Статистика")), form);
-}
-
-async function dashboard() {
-  const tests = await json("tests.json");
-  const test = el("select", {}, tests.map((t) => el("option", { value: t.id }, t.title)));
-  const since = el("input", { type: "date" });
-  const mode = el("select", {},
-    el("option", { value: "" }, "Все"),
-    el("option", { value: "exam" }, "Проверка в конце"),
-    el("option", { value: "practice" }, "Тренировка"));
-  const out = el("div");
-  const show = () => stats(test.value, since.value, mode.value, out);
-  [test, since, mode].forEach((c) => c.addEventListener("change", show));
+    el("div", { class: "login-actions", style: "margin-top: 0.8rem;" },
+      el("button", { class: "btn primary", type: "submit", style: "width: 100%; justify-content: center;" }, "Войти в систему")));
 
   root.replaceChildren(
-    el("section", { class: "intro" }, el("h1", {}, "Статистика")),
-    el("div", { class: "stats-row" },
-      el("label", {}, el("span", { class: "field-label" }, "Тест"), test),
-      el("label", {}, el("span", { class: "field-label" }, "С даты"), since),
-      el("label", {}, el("span", { class: "field-label" }, "Режим"), mode),
-      el("button", { class: "btn quiet", type: "button", onclick: async () => { await client.auth.signOut(); login(); } }, "Выйти")),
-    out);
+    el("div", { class: "login-screen" },
+      el("div", { class: "login-header" },
+        el("h1", {}, "Панель преподавателя"),
+        el("p", {}, "Управление тестами, конспектами, коллоквиумами и статистикой курса")),
+      form));
+}
+
+// ---------- навигация админ-панели ----------
+
+function renderAdmin() {
+  const userLabel = currentUser?.login || "Администратор";
+  const badge = el("span", {
+    class: "tag tag-accent",
+    style: "margin-left: 0.5rem; font-size: 0.82rem; font-weight: 600;",
+  }, `👤 ${userLabel}`);
+
+  const nav = el("div", { class: "admin-segmented-nav", role: "tablist" },
+    el("button", {
+      class: `admin-nav-item ${currentTab === "tests" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "tests",
+      onclick: () => { currentTab = "tests"; renderAdmin(); },
+    }, "📝 Тесты"),
+    el("button", {
+      class: `admin-nav-item ${currentTab === "notes" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "notes",
+      onclick: () => { currentTab = "notes"; renderAdmin(); },
+    }, "📚 Конспекты и теория"),
+    el("button", {
+      class: `admin-nav-item ${currentTab === "colloquiums" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "colloquiums",
+      onclick: () => { currentTab = "colloquiums"; renderAdmin(); },
+    }, "🎓 Коллоквиумы"),
+    el("button", {
+      class: `admin-nav-item ${currentTab === "stats" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "stats",
+      onclick: () => { currentTab = "stats"; renderAdmin(); },
+    }, "📊 Статистика"));
+
+  const exitBtn = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: async () => {
+      try {
+        await json("/api/auth/logout", { method: "POST" });
+      } catch {}
+      if (client) {
+        try { await client.auth.signOut(); } catch {}
+      }
+      currentUser = null;
+      login();
+    },
+  }, "🚪 Выйти");
+
+  const header = el("div", { class: "admin-header-bar" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.6rem;" },
+      el("h1", { style: "margin: 0; font-size: 1.45rem;" }, "Панель управления"),
+      badge),
+    nav,
+    exitBtn);
+
+  const container = el("div", { id: "admin-content" });
+
+  root.replaceChildren(header, container);
+
+  if (currentTab === "stats") {
+    statsTab(container);
+  } else if (currentTab === "notes") {
+    notesTab(container);
+  } else if (currentTab === "colloquiums") {
+    colloquiumsTab(container);
+  } else {
+    testsTab(container);
+  }
+}
+
+// ==========================================
+// 1. ВКЛАДКА: СТАТИСТИКА
+// ==========================================
+
+async function statsTab(container) {
+  let tests = [];
+  try {
+    const res = await json("/api/tests");
+    tests = Array.isArray(res) ? res : (res.tests || []);
+  } catch {
+    try {
+      tests = await json("tests.json");
+    } catch {
+      tests = [];
+    }
+  }
+
+  const testSelect = el("select", {}, tests.map((t) => el("option", { value: t.id }, t.title || t.id)));
+  const sinceInput = el("input", { type: "date" });
+  const modeSelect = el("select", {},
+    el("option", { value: "" }, "Все режимы"),
+    el("option", { value: "exam" }, "Проверка в конце"),
+    el("option", { value: "practice" }, "Тренировка"));
+
+  const exportBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    onclick: () => {
+      const testId = testSelect.value;
+      if (!testId) return;
+      json(`${testId}/key.json`).then(async (key) => {
+        const attempts = await loadAttempts(testId, sinceInput.value, modeSelect.value);
+        const graded = attempts.map((r) => ({ ...r, g: grade(key.questions, r.answers || {}) }));
+        csv(key, testId, graded);
+      }).catch((e) => alert(e.message));
+    },
+  }, "📥 Экспорт CSV");
+
+  const clearBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    style: "color: var(--bad); font-size: 0.85rem;",
+    onclick: async () => {
+      const testId = testSelect.value;
+      if (confirm(`Очистить все попытки по тесту «${testId}»?`)) {
+        try {
+          await json(`/api/attempts?testId=${encodeURIComponent(testId)}`, { method: "DELETE" });
+        } catch {}
+        localStorage.removeItem(`trainer:local_attempts:${testId}`);
+        show();
+      }
+    },
+  }, "🗑️ Сбросить попытки");
+
+  const out = el("div");
+  const show = () => {
+    if (testSelect.value) renderStats(testSelect.value, sinceInput.value, modeSelect.value, out);
+    else out.replaceChildren(el("p", { class: "muted" }, "Выберите тест для просмотра статистики."));
+  };
+  [testSelect, sinceInput, modeSelect].forEach((c) => c.addEventListener("change", show));
+
+  const toolbar = el("div", { class: "stats-toolbar" },
+    el("div", { class: "stats-field-box" },
+      el("label", {}, "Тест"),
+      testSelect),
+    el("div", { class: "stats-field-box" },
+      el("label", {}, "С даты"),
+      sinceInput),
+    el("div", { class: "stats-field-box" },
+      el("label", {}, "Режим"),
+      modeSelect),
+    el("div", { style: "display: flex; gap: 0.4rem; align-items: flex-end;" },
+      exportBtn,
+      clearBtn));
+
+  container.replaceChildren(toolbar, out);
+
   if (tests.length) show();
+  else out.replaceChildren(el("p", { class: "muted" }, "Тесты не найдены."));
+}
+
+function getDemoAttempts(testId) {
+  const localKey = `trainer:local_attempts:${testId}`;
+  try {
+    return JSON.parse(localStorage.getItem(localKey) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+async function loadAttempts(testId, since, mode) {
+  // 1. Попытка загрузить из SQLite БД нашего сервера
+  try {
+    const params = new URLSearchParams();
+    if (testId) params.set("testId", testId);
+    if (since) params.set("since", since);
+    if (mode) params.set("mode", mode);
+    const res = await json(`/api/attempts?${params.toString()}`);
+    if (Array.isArray(res) && res.length > 0) return res;
+    if (res && Array.isArray(res.attempts) && res.attempts.length > 0) return res.attempts;
+  } catch {}
+
+  // 2. Если есть подключение к Supabase — опрашиваем его
+  if (client) {
+    try {
+      const supaRows = await fetchAttempts(testId, since, mode);
+      if (supaRows && supaRows.length > 0) return supaRows;
+    } catch {}
+  }
+
+  // 3. Fallback на локальное хранилище браузера
+  let all = getDemoAttempts(testId);
+  if (since) all = all.filter((r) => r.created_at >= since);
+  if (mode) all = all.filter((r) => r.mode === mode);
+  return all;
 }
 
 async function fetchAttempts(testId, since, mode) {
@@ -97,38 +404,73 @@ async function fetchAttempts(testId, since, mode) {
 }
 
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
-const share = (rs) => rs.reduce((s, r) => s + r.g.score / r.g.max, 0) / rs.length;
+const share = (rs) => (rs.length ? rs.reduce((s, r) => s + (r.g.max ? r.g.score / r.g.max : 0), 0) / rs.length : 0);
 
-async function stats(testId, since, mode, out) {
-  out.replaceChildren(el("p", { class: "muted" }, "Загружаем…"));
+async function renderStats(testId, since, mode, out) {
+  out.replaceChildren(el("p", { class: "muted" }, "Загружаем статистику…"));
   let key, rows;
   try {
-    [key, rows] = await Promise.all([json(`${testId}/key.json`), fetchAttempts(testId, since, mode)]);
+    [key, rows] = await Promise.all([
+      json(`${testId}/key.json`),
+      loadAttempts(testId, since, mode),
+    ]);
   } catch (e) {
     out.replaceChildren(el("p", { class: "field-error" }, `Не загрузилось: ${e.message}`));
     return;
   }
-  if (!rows.length) {
-    out.replaceChildren(el("p", { class: "muted" },
-      "Попыток нет. Если тест уже проходили, проверьте, что ваш аккаунт есть в таблице admins."));
+  if (!rows || !rows.length) {
+    out.replaceChildren(
+      el("div", { style: "padding: 3rem 1.5rem; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); margin-top: 1.5rem;" },
+        el("div", { style: "font-size: 2.5rem; margin-bottom: 0.6rem;" }, "📊"),
+        el("h3", { style: "margin: 0 0 0.5rem; font-size: 1.15rem;" }, "По этому тесту пока нет решений"),
+        el("p", { class: "muted", style: "margin: 0 auto; max-width: 32rem; font-size: 0.92rem; line-height: 1.5;" },
+          "Решения сохраняются в базу данных SQLite на сервере при завершении теста студентом. Откройте этот тест в интерфейсе студента, ответьте на задания и завершите тест — статистика появится здесь автоматически.")
+      )
+    );
     return;
   }
 
-  // Перепроверка по текущему ключу: исправленный ключ сразу меняет статистику.
   const qs = key.questions;
   const graded = rows.map((r) => ({ ...r, g: grade(qs, r.answers || {}) }));
   const groups = {};
   for (const r of graded) (groups[r.group_name || "без группы"] ||= []).push(r);
 
-  out.replaceChildren(
-    el("p", { class: "score" }, `${graded.length}`,
-      el("small", {}, `${attemptsWord(graded.length)}, в среднем ${Math.round(share(graded) * 100)}%`)),
-    el("p", {}, el("button", { class: "btn quiet", type: "button", onclick: () => csv(key, testId, graded) }, "Скачать CSV")),
+  const totalCount = graded.length;
+  const avgScorePct = Math.round(share(graded) * 100);
+  const passedCount = graded.filter((r) => r.g.max && (r.g.score / r.g.max) >= 0.6).length;
+  const passRatePct = pct(passedCount, totalCount);
+  const avgSec = Math.round(graded.reduce((s, r) => s + (r.duration_sec || 0), 0) / totalCount);
+  const avgTimeStr = avgSec > 0 ? `${Math.floor(avgSec / 60)} мин ${avgSec % 60} с` : "—";
 
+  const kpiCards = el("div", { class: "kpi-grid" },
+    el("div", { class: "kpi-card" },
+      el("div", { class: "kpi-label" }, "Всего решений"),
+      el("div", { class: "kpi-val" }, String(totalCount)),
+      el("div", { class: "kpi-sub" }, attemptsWord(totalCount))),
+    el("div", { class: "kpi-card" },
+      el("div", { class: "kpi-label" }, "Средний балл"),
+      el("div", { class: "kpi-val", style: avgScorePct >= 60 ? "color: var(--good);" : "color: var(--accent);" }, `${avgScorePct}%`),
+      el("div", { class: "kpi-sub" }, "от максимума")),
+    el("div", { class: "kpi-card" },
+      el("div", { class: "kpi-label" }, "Сдали (≥ 60%)"),
+      el("div", { class: "kpi-val", style: passRatePct >= 50 ? "color: var(--good);" : "color: var(--bad);" }, `${passRatePct}%`),
+      el("div", { class: "kpi-sub" }, `${passedCount} из ${totalCount} студ.`)),
+    el("div", { class: "kpi-card" },
+      el("div", { class: "kpi-label" }, "Среднее время"),
+      el("div", { class: "kpi-val" }, avgTimeStr),
+      el("div", { class: "kpi-sub" }, "на одну попытку")));
+
+  const children = [
+    kpiCards,
     el("h2", {}, "По группам"),
     table(["Группа", "Попыток", "Средний результат"],
       Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, "ru"))
-        .map(([g, rs]) => [g, rs.length, `${Math.round(share(rs) * 100)}%`])),
+        .map(([g, rs]) => [
+          g,
+          rs.length,
+          el("span", { class: "tag", style: share(rs) >= 0.6 ? "background: var(--good-soft); color: var(--good);" : "" },
+            `${Math.round(share(rs) * 100)}%`)
+        ])),
 
     el("h2", {}, "По заданиям"),
     el("p", { class: "muted" },
@@ -145,7 +487,10 @@ async function stats(testId, since, mode, out) {
       ];
     })),
 
-    feedbackList(graded));
+    feedbackList(graded),
+  ].filter(Boolean);
+
+  out.replaceChildren(...children);
 }
 
 function attemptsWord(n) {
@@ -177,7 +522,7 @@ function table(head, rows) {
 }
 
 function feedbackList(graded) {
-  const items = graded.filter((r) => r.feedback).reverse();
+  const items = graded.filter((r) => r.feedback && String(r.feedback).trim()).reverse();
   if (!items.length) return null;
   return el("div", {}, el("h2", {}, "Отзывы"),
     el("ul", { class: "wrong-list" }, items.map((r) => el("li", {},
@@ -198,3 +543,2546 @@ function csv(key, testId, graded) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+// ==========================================
+// 2. ВКЛАДКА: КОНСТРУКТОР ТЕСТОВ (GOOGLE FORMS-LIKE)
+// ==========================================
+
+async function testsTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем список тестов…"));
+  let list = [];
+  try {
+    const res = await json("/api/tests");
+    list = Array.isArray(res) ? res : (res.tests || []);
+  } catch {
+    try {
+      list = await json("tests.json");
+    } catch (e) {
+      container.replaceChildren(el("p", { class: "field-error" }, `Не удалось загрузить тесты: ${e.message}`));
+      return;
+    }
+  }
+
+  const createBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: () => createNewTestPrompt(container),
+  }, "➕ Создать новый тест");
+
+  const head = el("div", { class: "test-manager-head" },
+    el("div", {},
+      el("h2", { style: "margin: 0;" }, "Управление тестами"),
+      el("p", { class: "muted", style: "margin: 0.2rem 0 0;" }, "Создавайте и редактируйте тесты визуально в браузере")),
+    createBtn);
+
+  // Сбор уникальных тем/папок
+  const topicsSet = new Set();
+  for (const t of list) {
+    if (t.topic && t.topic.trim()) topicsSet.add(t.topic.trim());
+  }
+  const topics = ["Все", ...Array.from(topicsSet)];
+  let activeTopic = "Все";
+
+  const tabsContainer = el("div", { class: "topic-tabs", style: "margin-bottom: 1.25rem;" });
+  const grid = el("div", { class: "test-cards-grid" });
+
+  function renderCards() {
+    const filtered = activeTopic === "Все"
+      ? list
+      : list.filter((t) => (t.topic || "Без темы") === activeTopic);
+
+    grid.replaceChildren();
+
+    if (!filtered.length) {
+      grid.replaceChildren(el("p", { class: "muted", style: "grid-column: 1 / -1; padding: 2rem; text-align: center;" }, "В этой теме пока нет тестов."));
+      return;
+    }
+
+    for (const t of filtered) {
+      const card = el("div", { class: "test-card" },
+        el("div", {},
+          el("div", { class: "test-card-title" }, t.title || t.id),
+          el("div", { class: "test-card-desc" }, t.description || "Без описания"),
+          el("div", { class: "test-card-meta", style: "margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 0.4rem;" },
+            el("span", { class: "tag" }, `ID: ${t.id}`),
+            el("span", { class: "tag" }, `${t.count || 0} заданий`),
+            t.topic ? el("span", { class: "tag tag-accent" }, `📁 ${t.topic}`) : null,
+            t.hidden ? el("span", { class: "tag", style: "background: var(--bad-soft); color: var(--bad);" }, "Скрыт") : null)),
+        el("div", { class: "test-card-actions" },
+          el("button", {
+            class: "btn primary btn-sm",
+            type: "button",
+            onclick: () => openEditor(t.id, container),
+          }, "✏️ Редактировать"),
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: () => openPreviewModal(`${t.id}/`, t.title || t.id),
+          }, "🔍 Просмотр"),
+          el("button", {
+            class: `btn btn-sm btn-visibility-toggle ${t.hidden ? "is-hidden" : "is-visible"}`,
+            type: "button",
+            title: t.hidden ? "Тест скрыт для студентов. Нажмите, чтобы открыть." : "Тест виден студентам. Нажмите, чтобы скрыть.",
+            onclick: async () => {
+              try {
+                await json(`/api/tests/${encodeURIComponent(t.id)}`, {
+                  method: "PUT",
+                  body: { hidden: !t.hidden },
+                });
+                testsTab(container);
+              } catch (e) {
+                alert(`Ошибка изменения видимости теста: ${e.message}`);
+              }
+            },
+          }, t.hidden ? "🙈 Скрыт" : "👁️ Виден"),
+          el("button", {
+            class: "btn quiet btn-sm btn-delete-action",
+            type: "button",
+            title: "Удалить тест",
+            onclick: () => deleteTestConfirm(t.id, container),
+          }, "🗑️")));
+      grid.append(card);
+    }
+  }
+
+  function renderTabs() {
+    tabsContainer.replaceChildren(
+      ...topics.map((tp) => el("button", {
+        class: `topic-tab ${tp === activeTopic ? "active" : ""}`,
+        type: "button",
+        onclick: () => { activeTopic = tp; renderTabs(); renderCards(); },
+      }, tp === "Все" ? "Все темы" : `📁 ${tp}`))
+    );
+  }
+
+  renderTabs();
+  renderCards();
+
+  container.replaceChildren(head, topics.length > 1 ? tabsContainer : el("span"), grid);
+}
+
+async function createNewTestPrompt(container) {
+  const idInput = el("input", { type: "text", placeholder: "relations-3", required: true });
+  const titleInput = el("input", { type: "text", placeholder: "Бинарные отношения, часть 3", required: true });
+  const topicInput = el("input", { type: "text", placeholder: "Бинарные отношения (необязательно)" });
+  const status = el("p", { class: "field-error" });
+
+  const modal = el("dialog", { style: "border: 0; border-radius: var(--radius-lg); padding: 1.5rem; max-width: 28rem; width: 90vw; background: var(--card); box-shadow: var(--shadow-lg);" },
+    el("h2", { style: "margin-top: 0;" }, "Новый тест"),
+    el("p", { class: "muted" }, "Задайте идентификатор для ссылки, название и тему теста:"),
+    el("form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        status.textContent = "";
+        const id = idInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+        const title = titleInput.value.trim();
+        const topic = topicInput.value.trim();
+        if (!id || !title) return;
+        try {
+          await json("/api/tests", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, title, topic }),
+          });
+          modal.close();
+          modal.remove();
+          openEditor(id, container);
+        } catch (err) {
+          status.textContent = err.message;
+        }
+      },
+    },
+      el("label", {}, el("span", { class: "field-label" }, "Идентификатор (латиница для URL)"), idInput),
+      el("label", {}, el("span", { class: "field-label" }, "Название теста"), titleInput),
+      el("label", {}, el("span", { class: "field-label" }, "Тема / папка"), topicInput),
+      status,
+      el("div", { style: "display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1rem;" },
+        el("button", { class: "btn quiet", type: "button", onclick: () => { modal.close(); modal.remove(); } }, "Отмена"),
+        el("button", { class: "btn primary", type: "submit" }, "Создать и редактировать"))));
+
+  document.body.append(modal);
+  modal.showModal();
+}
+
+async function deleteTestConfirm(testId, container) {
+  if (!confirm(`Вы действительно хотите удалить тест «${testId}»? Все файлы теста будут удалены.`)) return;
+  try {
+    await json(`/api/tests/${testId}`, { method: "DELETE" });
+    testsTab(container);
+  } catch (err) {
+    alert(`Ошибка удаления: ${err.message}`);
+  }
+}
+
+// ---------- ВИЗУАЛЬНЫЙ РЕДАКТОР (GOOGLE FORMS С БОКОВОЙ ПАНЕЛЬЮ) ----------
+
+function cleanStr(val) {
+  if (val === null || val === undefined) return "";
+  const s = String(val).trim();
+  if (s === "null" || s === "undefined") return "";
+  return s;
+}
+
+function sanitizeModel(model) {
+  if (!model) return model;
+  model.id = cleanStr(model.id);
+  model.meta = model.meta || {};
+  model.meta.title = cleanStr(model.meta.title) || "Без названия";
+  model.meta.description = cleanStr(model.meta.description);
+  model.meta.topic = cleanStr(model.meta.topic);
+  model.meta.feedback = cleanStr(model.meta.feedback);
+  model.meta.order = Math.max(0, Number(model.meta.order) || 0);
+  model.meta.hidden = Boolean(model.meta.hidden);
+
+  model.sections = Array.isArray(model.sections) ? model.sections : [];
+  if (model.sections.length === 0) {
+    model.sections.push({ title: "Блок 1", questions: [] });
+  }
+
+  for (const sec of model.sections) {
+    sec.title = cleanStr(sec.title) || "Блок";
+    sec.questions = Array.isArray(sec.questions) ? sec.questions : [];
+    for (const q of sec.questions) {
+      q.id = cleanStr(q.id);
+      q.text = cleanStr(q.text);
+      q.type = q.type || "single";
+      q.explanation = cleanStr(q.explanation);
+      q.hints = Array.isArray(q.hints)
+        ? q.hints.map(cleanStr).filter((h) => h.length > 0)
+        : [];
+      if (q.type === "text") {
+        q.format = cleanStr(q.format) || "число";
+        q.answers = Array.isArray(q.answers)
+          ? q.answers.map(cleanStr).filter((a) => a.length > 0)
+          : ["0"];
+        q.options = [];
+      } else {
+        q.answers = [];
+        q.options = Array.isArray(q.options) ? q.options : [];
+        for (const opt of q.options) {
+          opt.md = cleanStr(opt.md);
+          opt.note = cleanStr(opt.note);
+          opt.correct = Boolean(opt.correct);
+        }
+      }
+    }
+  }
+  model.images = Array.isArray(model.images) ? model.images : [];
+  return model;
+}
+
+function parseRawMdToSections(raw) {
+  if (!raw) return [{ title: "Блок 1", questions: [] }];
+  const body = raw.replace(/^---[\s\S]*?---\s*/, "");
+  const sections = [];
+  let currentSec = null;
+  let currentQ = null;
+  let auto = 0;
+
+  const flushQ = () => {
+    if (!currentQ) return;
+    if (!currentSec) {
+      currentSec = { title: "Блок 1", questions: [] };
+      sections.push(currentSec);
+    }
+    currentSec.questions.push(currentQ);
+    currentQ = null;
+  };
+
+  const lines = body.split(/\r?\n/);
+  for (const line of lines) {
+    const h1 = line.match(/^#\s+(.*)$/);
+    const h2 = line.match(/^##\s+(.*)$/);
+    if (h1) {
+      flushQ();
+      currentSec = { title: h1[1].trim(), questions: [] };
+      sections.push(currentSec);
+    } else if (h2) {
+      flushQ();
+      const qid = h2[1].trim().split(/[\s.]/)[0] || String(++auto);
+      currentQ = { id: qid, text: "", type: "single", options: [], answers: [], hints: [], explanation: "", format: "" };
+    } else if (currentQ) {
+      const opt = line.match(/^- ([([])([xXхХ ])[)\]]\s+(.*)$/);
+      const kw = line.match(/^(Ответ|Формат|Подсказка|Пояснение)\s*:\s*(.*)$/);
+      const note = line.match(/^\s{2,}>\s?(.*)$/);
+
+      if (opt) {
+        currentQ.type = opt[1] === "(" ? "single" : "multiple";
+        currentQ.options.push({ md: opt[3], correct: opt[2].trim() !== "", note: "" });
+      } else if (note && currentQ.options.length) {
+        currentQ.options.at(-1).note = (currentQ.options.at(-1).note ? currentQ.options.at(-1).note + "\n" : "") + note[1];
+      } else if (kw) {
+        const [, word, rest] = kw;
+        if (word === "Ответ") {
+          currentQ.type = "text";
+          currentQ.answers.push(rest.trim());
+        } else if (word === "Формат") {
+          currentQ.format = rest.trim();
+        } else if (word === "Подсказка") {
+          if (rest.trim()) currentQ.hints.push(rest.trim());
+        } else if (word === "Пояснение") {
+          currentQ.explanation = (currentQ.explanation ? currentQ.explanation + "\n" : "") + rest.trim();
+        }
+      } else {
+        currentQ.text = (currentQ.text ? currentQ.text + "\n" : "") + line;
+      }
+    }
+  }
+  flushQ();
+
+  if (!sections.length) {
+    sections.push({ title: "Блок 1", questions: [] });
+  }
+  return sections;
+}
+
+async function openEditor(testId, container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем редактор теста…"));
+  let testData;
+  try {
+    testData = await json(`/api/tests/${testId}`);
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "field-error" }, `Не удалось загрузить тест: ${err.message}`));
+    return;
+  }
+
+  let sections = (testData.sections && testData.sections.length) ? testData.sections : null;
+  if ((!sections || !sections.some((s) => s.questions && s.questions.length)) && testData.rawMd) {
+    sections = parseRawMdToSections(testData.rawMd);
+  }
+  if (!sections || !sections.length) {
+    sections = [{ title: "Блок 1", questions: [] }];
+  }
+
+  // Создаём рабочую копию модели для редактирования с полной санитизацией от null
+  const model = sanitizeModel({
+    id: testData.id,
+    meta: {
+      title: testData.meta?.title || "Без названия",
+      description: testData.meta?.description || "",
+      topic: testData.meta?.topic || "",
+      order: Math.max(0, Number(testData.meta?.order) || 0),
+      hidden: Boolean(testData.meta?.hidden),
+      feedback: testData.meta?.feedback || "",
+    },
+    sections,
+    images: testData.images || [],
+  });
+
+  renderEditorForm(model, container);
+}
+
+function renderEditorForm(model, container) {
+  const saveMsg = el("span", { class: "save-msg" });
+  let isSaving = false;
+  let isDirty = false;
+  const markDirty = () => { isDirty = true; };
+
+  const beforeUnloadHandler = (e) => {
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  };
+  window.addEventListener("beforeunload", beforeUnloadHandler);
+
+  const cleanupAndLeave = () => {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+    testsTab(container);
+  };
+
+  // Состояние свернутых карточек и ошибок валидации
+  const collapsedSet = new Set();
+  let validationErrors = new Map(); // Question -> string[]
+  let globalErrors = [];
+
+  // Валидация всей модели
+  function validate() {
+    const errors = new Map();
+    const globals = [];
+
+    if (model.meta.order < 0) {
+      globals.push("Порядок (order) не может быть отрицательным.");
+    }
+    if (!model.meta.title?.trim()) {
+      globals.push("Название теста не может быть пустым.");
+    }
+
+    const seenIds = new Map();
+    let totalQuestions = 0;
+
+    for (const sec of model.sections) {
+      for (const q of sec.questions) {
+        totalQuestions++;
+        const qErrors = [];
+        const qId = String(q.id || "").trim();
+
+        if (!qId) {
+          qErrors.push("ID задания не может быть пустым.");
+        } else if (seenIds.has(qId)) {
+          qErrors.push(`Дублирующийся ID задания: «${qId}». ID должны быть уникальными.`);
+          const prev = seenIds.get(qId);
+          if (!errors.has(prev)) errors.set(prev, []);
+          if (!errors.get(prev).some((e) => e.includes("Дублирующийся ID"))) {
+            errors.get(prev).push(`Дублирующийся ID задания: «${qId}». ID должны быть уникальными.`);
+          }
+        } else {
+          seenIds.set(qId, q);
+        }
+
+        if (!q.text?.trim()) {
+          qErrors.push("Условие задания не может быть пустым.");
+        }
+
+        if (q.type === "single" || q.type === "multiple") {
+          if (!q.options || q.options.length < 2) {
+            qErrors.push("Должно быть минимум 2 варианта ответа.");
+          } else {
+            for (let i = 0; i < q.options.length; i++) {
+              if (!q.options[i].md?.trim()) {
+                qErrors.push(`Вариант ${i + 1} не может быть пустым.`);
+              }
+            }
+            const correctCount = q.options.filter((o) => o.correct).length;
+            if (q.type === "single") {
+              if (correctCount !== 1) {
+                qErrors.push("Для типа «Один верный вариант» выберите ровно один правильный ответ.");
+              }
+            } else {
+              if (correctCount < 1) {
+                qErrors.push("Для типа «Несколько верных» выберите хотя бы один правильный ответ.");
+              }
+            }
+          }
+        } else if (q.type === "text") {
+          if (!q.format?.trim()) {
+            qErrors.push("Укажите формат ответа (например: число или {множество}).");
+          }
+          const validAnswers = (q.answers || []).filter((a) => a && a.trim());
+          if (!validAnswers.length) {
+            qErrors.push("Укажите хотя бы один правильный ответ.");
+          }
+        }
+
+        if (qErrors.length) {
+          errors.set(q, (errors.get(q) || []).concat(qErrors));
+        }
+      }
+    }
+
+    if (totalQuestions === 0) {
+      globals.push("Тест должен содержать хотя бы одно задание.");
+    }
+
+    return { valid: errors.size === 0 && globals.length === 0, errors, globals };
+  }
+
+  const saveBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: async () => {
+      if (isSaving) return;
+      sanitizeModel(model);
+
+      const res = validate();
+      validationErrors = res.errors;
+      globalErrors = res.globals;
+
+      if (!res.valid) {
+        // Разворачиваем карточки с ошибками для наглядности
+        for (const q of validationErrors.keys()) {
+          collapsedSet.delete(q);
+        }
+        renderSections();
+
+        const totalErrCount = globalErrors.length + Array.from(validationErrors.values()).reduce((sum, arr) => sum + arr.length, 0);
+        saveMsg.className = "save-msg error";
+        saveMsg.textContent = `Ошибок валидации: ${totalErrCount}. Пожалуйста, исправьте их.`;
+
+        // Скроллим к первой ошибочной карточке
+        const firstErrCard = sectionsBox.querySelector(".question-card.has-error");
+        if (firstErrCard) {
+          firstErrCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        return;
+      }
+
+      isSaving = true;
+      saveMsg.className = "save-msg";
+      saveMsg.textContent = "Сохраняем…";
+      saveBtn.disabled = true;
+
+      // Нормализуем ID вопросов перед сохранением
+      let autoId = 0;
+      for (const sec of model.sections) {
+        for (const q of sec.questions) {
+          if (!q.id) q.id = String(++autoId);
+        }
+      }
+
+      const targetId = cleanStr(model.id) || cleanStr(testId);
+      try {
+        await json(`/api/tests/${encodeURIComponent(targetId)}`, {
+          method: "PUT",
+          body: { id: targetId, data: model },
+        });
+        validationErrors.clear();
+        globalErrors = [];
+        renderSections();
+        isDirty = false;
+        saveMsg.className = "save-msg success";
+        saveMsg.textContent = "✓ Сохранено успешно!";
+        setTimeout(() => { if (saveMsg.textContent.includes("✓")) saveMsg.textContent = ""; }, 3000);
+      } catch (err) {
+        saveMsg.className = "save-msg error";
+        saveMsg.textContent = `Ошибка сохранения: ${err.message}`;
+      } finally {
+        isSaving = false;
+        saveBtn.disabled = false;
+      }
+    },
+  }, "💾 Сохранить тест");
+
+  const backBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    onclick: () => {
+      if (isDirty) {
+        const ok = confirm("У вас есть несохранённые изменения в тесте.\n\nВы действительно хотите выйти без сохранения?");
+        if (!ok) return;
+      }
+      cleanupAndLeave();
+    },
+  }, "← К списку тестов");
+
+  const hiddenCheckbox = el("input", {
+    type: "checkbox",
+    checked: Boolean(model.meta.hidden),
+    onchange: () => {
+      model.meta.hidden = hiddenCheckbox.checked;
+      isDirty = true;
+      updateTestHideBtn();
+    },
+  });
+
+  const hideTestBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    title: "Скрыть / показать тест на главной",
+    onclick: () => {
+      hiddenCheckbox.checked = !hiddenCheckbox.checked;
+      model.meta.hidden = hiddenCheckbox.checked;
+      isDirty = true;
+      updateTestHideBtn();
+    },
+  });
+
+  function updateTestHideBtn() {
+    hideTestBtn.textContent = hiddenCheckbox.checked ? "🙈 Скрыт для студентов" : "👁️ Виден на главной";
+    hideTestBtn.className = `btn btn-sm btn-visibility-toggle ${hiddenCheckbox.checked ? "is-hidden" : "is-visible"}`;
+  }
+  updateTestHideBtn();
+
+  const previewLink = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: () => openPreviewModal(`${model.id}/`, model.meta.title || model.id),
+  }, "🔍 Предпросмотр");
+
+  const topNav = el("div", { class: "editor-top-nav" },
+    backBtn,
+    el("div", { style: "display: flex; gap: 0.6rem; align-items: center;" }, hideTestBtn, previewLink));
+
+  // Карточка заголовка (Google Forms Header Card)
+  const titleInput = el("input", {
+    class: "editor-title-input",
+    type: "text",
+    value: cleanStr(model.meta.title),
+    placeholder: "Название теста",
+    oninput: () => { model.meta.title = titleInput.value; },
+  });
+
+  const descInput = el("textarea", {
+    rows: 2,
+    placeholder: "Описание теста для студентов (поддерживается Markdown и $формулы$)",
+    oninput: () => { model.meta.description = descInput.value; },
+  }, cleanStr(model.meta.description));
+
+  const topicInput = el("input", {
+    type: "text",
+    value: cleanStr(model.meta.topic),
+    placeholder: "например: Бинарные отношения",
+    oninput: () => { model.meta.topic = topicInput.value.trim(); },
+  });
+
+  const orderInput = el("input", {
+    type: "number",
+    min: "0",
+    value: String(model.meta.order ?? 0),
+    oninput: () => {
+      const val = parseInt(orderInput.value, 10);
+      model.meta.order = isNaN(val) ? 0 : Math.max(0, val);
+      if (orderInput.value !== "" && Number(orderInput.value) < 0) {
+        orderInput.value = "0";
+      }
+    },
+  });
+
+  const feedbackInput = el("input", {
+    type: "text",
+    value: cleanStr(model.meta.feedback),
+    placeholder: "Что было непонятно? Необязательно",
+    oninput: () => { model.meta.feedback = feedbackInput.value; },
+  });
+
+  const headerCard = el("div", { class: "editor-card editor-header-card" },
+    titleInput,
+    descInput,
+    el("div", { class: "editor-meta-grid" },
+      el("label", {}, el("span", { class: "field-label" }, "Папка / Тема (topic)"), topicInput),
+      el("label", {}, el("span", { class: "field-label" }, "Порядок на главной (order >= 0)"), orderInput),
+      el("label", {}, el("span", { class: "field-label" }, "Вопрос для отзыва"), feedbackInput),
+      el("label", { style: "display: flex; align-items: center; gap: 0.5rem; margin-top: 1.5rem; cursor: pointer;" },
+        hiddenCheckbox,
+        el("span", { class: "field-label", style: "margin: 0;" }, "Скрыть на главной"))));
+
+  // Боковая панель десктоп-навигации (Side Panel)
+  const sideMapGrid = el("div", { class: "side-map-grid" });
+  const sideQCount = el("span", { class: "tag tag-accent", id: "side-q-count" }, "0 зад.");
+
+  const toggleAllCollapseBtn = el("button", {
+    class: "btn quiet editor-action-btn",
+    type: "button",
+    style: "justify-content: center; text-align: center; width: 100%;",
+    onclick: () => {
+      const allQ = model.sections.flatMap((s) => s.questions);
+      if (collapsedSet.size >= allQ.length) {
+        collapsedSet.clear();
+      } else {
+        for (const q of allQ) collapsedSet.add(q);
+      }
+      renderSections();
+    },
+  }, "↕️ Свернуть / Развернуть все");
+
+  const sidePreviewLink = el("button", {
+    class: "btn quiet editor-action-btn",
+    type: "button",
+    style: "justify-content: center; text-align: center; width: 100%;",
+    onclick: () => openPreviewModal(`${model.id}/`, model.meta.title || model.id),
+  }, "👁️ Открыть тест");
+
+  const sidePanel = el("aside", { class: "editor-side-panel", "aria-label": "Панель быстрой навигации" },
+    el("div", { class: "editor-side-card" },
+      el("div", { class: "editor-side-header" },
+        el("span", { class: "editor-side-title" }, "Навигатор теста"),
+        sideQCount),
+      el("div", { class: "editor-map-section" },
+        el("div", { class: "editor-map-title" }, "Карта заданий"),
+        sideMapGrid),
+      el("div", { class: "editor-side-actions" },
+        el("button", {
+          class: "btn primary editor-action-btn",
+          type: "button",
+          style: "justify-content: center; text-align: center; width: 100%;",
+          onclick: () => saveBtn.click(),
+        }, "💾 Сохранить"),
+        el("button", {
+          class: "btn quiet editor-action-btn",
+          type: "button",
+          style: "justify-content: center; text-align: center; width: 100%;",
+          onclick: () => {
+            const lastSec = model.sections.at(-1);
+            if (lastSec) {
+              lastSec.questions.push({
+                id: String(lastSec.questions.length + 1),
+                text: "Новое задание",
+                type: "single",
+                options: [
+                  { md: "Вариант 1", correct: true, note: "" },
+                  { md: "Вариант 2", correct: false, note: "" },
+                ],
+                hints: [],
+                explanation: "Пояснение.",
+              });
+              renderSections();
+              const lastIdx = model.sections.flatMap((s) => s.questions).length;
+              document.getElementById(`q-card-${lastIdx}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          },
+        }, "➕ Добавить задание"),
+        toggleAllCollapseBtn,
+        sidePreviewLink,
+        el("button", {
+          class: "btn quiet editor-action-btn",
+          type: "button",
+          style: "justify-content: center; text-align: center; width: 100%;",
+          onclick: () => window.scrollTo({ top: 0, behavior: "smooth" }),
+        }, "⬆️ В начало"))));
+
+  // Синхронизация навигации по заданиям в редакторе с автопрокруткой миникарты
+  let isEditorManualNav = false;
+  let editorManualNavTimer = null;
+  let editorObserver = null;
+
+  function highlightEditorQuestion(qNum, scrollInMap = true) {
+    if (!qNum) return;
+    let activeMapBtn = null;
+    sideMapGrid.querySelectorAll(".side-map-btn").forEach((btn) => {
+      const isCurrent = btn.dataset.qNum === String(qNum);
+      btn.classList.toggle("current", isCurrent);
+      if (isCurrent && !activeMapBtn) activeMapBtn = btn;
+    });
+    if (scrollInMap && activeMapBtn) {
+      activeMapBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    }
+  }
+
+  // Контейнер секций и вопросов
+  const sectionsBox = el("div", { style: "display: grid; gap: 1.5rem;" });
+
+  const renderSections = () => {
+    sectionsBox.replaceChildren();
+    sideMapGrid.replaceChildren();
+    let qTotal = 0;
+
+    model.sections.forEach((sec, sIdx) => {
+      const secTitleInput = el("input", {
+        class: "section-title-input",
+        type: "text",
+        value: sec.title,
+        placeholder: "Название блока (например: Блок 1. Отношения эквивалентности)",
+        oninput: () => { sec.title = secTitleInput.value; },
+      });
+
+      const delSecBtn = el("button", {
+        class: "btn quiet",
+        type: "button",
+        style: "color: var(--bad); font-size: 0.85rem;",
+        onclick: () => {
+          if (confirm(`Удалить блок «${sec.title || sIdx + 1}» со всеми заданиями?`)) {
+            model.sections.splice(sIdx, 1);
+            renderSections();
+          }
+        },
+      }, "Удалить блок");
+
+      const secHead = el("div", { class: "section-card-head" },
+        el("div", { style: "flex: 1;" }, secTitleInput),
+        model.sections.length > 1 ? delSecBtn : null);
+
+      const questionsList = el("div", { style: "display: grid; gap: 1rem; margin-top: 1rem;" });
+
+      sec.questions.forEach((q, qIdx) => {
+        qTotal++;
+        const currentQNum = qTotal;
+        const qErrors = validationErrors.get(q) || [];
+        const isCollapsed = collapsedSet.has(q);
+
+        // Карточка вопроса
+        const qCard = renderQuestionCard({
+          q,
+          displayNum: currentQNum,
+          sec,
+          sIdx,
+          qIdx,
+          isCollapsed,
+          errors: qErrors,
+          model,
+          onChange: () => renderSections(),
+          onToggleCollapse: () => {
+            if (collapsedSet.has(q)) collapsedSet.delete(q);
+            else collapsedSet.add(q);
+            renderSections();
+          },
+          onMoveUp: () => {
+            if (qIdx > 0) {
+              const t = sec.questions[qIdx];
+              sec.questions[qIdx] = sec.questions[qIdx - 1];
+              sec.questions[qIdx - 1] = t;
+              renderSections();
+            }
+          },
+          onMoveDown: () => {
+            if (qIdx < sec.questions.length - 1) {
+              const t = sec.questions[qIdx];
+              sec.questions[qIdx] = sec.questions[qIdx + 1];
+              sec.questions[qIdx + 1] = t;
+              renderSections();
+            }
+          },
+        });
+        questionsList.append(qCard);
+
+        // Кнопка в боковой миникарте
+        const mapBtn = el("button", {
+          class: `side-map-btn ${qErrors.length ? "error" : ""}`,
+          type: "button",
+          "data-q-num": String(currentQNum),
+          title: `Задание № ${currentQNum}${qErrors.length ? " (есть ошибки)" : ""}`,
+          onclick: () => {
+            highlightEditorQuestion(currentQNum, true);
+            isEditorManualNav = true;
+            clearTimeout(editorManualNavTimer);
+            editorManualNavTimer = setTimeout(() => { isEditorManualNav = false; }, 900);
+            if (collapsedSet.has(q)) {
+              collapsedSet.delete(q);
+              renderSections();
+            }
+            const targetCard = document.getElementById(`q-card-${currentQNum}`);
+            if (targetCard) {
+              targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+              targetCard.style.transition = "outline 0.25s, box-shadow 0.25s";
+              targetCard.style.outline = "2px solid var(--accent)";
+              targetCard.style.boxShadow = "0 0 0 4px var(--accent-soft)";
+              setTimeout(() => {
+                targetCard.style.outline = "";
+                targetCard.style.boxShadow = "";
+              }, 1200);
+            }
+          },
+        }, String(currentQNum));
+        sideMapGrid.append(mapBtn);
+      });
+
+      const addQuestionBtn = el("button", {
+        class: "btn quiet",
+        type: "button",
+        style: "border: 1px dashed var(--line-strong); padding: 0.7rem; justify-content: center; margin-top: 0.5rem;",
+        onclick: () => {
+          sec.questions.push({
+            id: String(sec.questions.length + 1),
+            text: "Новое задание",
+            type: "single",
+            options: [
+              { md: "Вариант 1", correct: true, note: "" },
+              { md: "Вариант 2", correct: false, note: "" },
+            ],
+            hints: [],
+            explanation: "Разбор задания.",
+          });
+          renderSections();
+        },
+      }, "➕ Добавить задание в этот блок");
+
+      const secBlock = el("div", { class: "section-block" }, secHead, questionsList, addQuestionBtn);
+      sectionsBox.append(secBlock);
+    });
+
+    sideQCount.textContent = `${qTotal} зад.`;
+
+    const addSectionBtn = el("button", {
+      class: "btn quiet",
+      type: "button",
+      style: "border: 2px dashed var(--accent); color: var(--accent-ink); padding: 0.85rem; justify-content: center;",
+      onclick: () => {
+        model.sections.push({
+          title: `Блок ${model.sections.length + 1}`,
+          questions: [
+            {
+              id: "1",
+              text: "Условие задания",
+              type: "single",
+              options: [
+                { md: "Вариант А", correct: true, note: "" },
+                { md: "Вариант Б", correct: false, note: "" },
+              ],
+              hints: [],
+              explanation: "Пояснение.",
+            },
+          ],
+        });
+        renderSections();
+      },
+    }, "➕ Добавить новый блок заданий");
+
+    sectionsBox.append(addSectionBtn);
+
+    // Подключение ScrollSpy для отслеживания текущего задания в редакторе
+    if (editorObserver) editorObserver.disconnect();
+    const visibleEditorCards = new Set();
+    editorObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          visibleEditorCards.add(entry.target);
+        } else {
+          visibleEditorCards.delete(entry.target);
+        }
+      }
+      if (isEditorManualNav) return;
+      if (visibleEditorCards.size === 0) return;
+      let bestEl = null;
+      let minDistance = Infinity;
+      for (const el of visibleEditorCards) {
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.top - 140);
+        if (dist < minDistance) {
+          minDistance = dist;
+          bestEl = el;
+        }
+      }
+      if (bestEl?.dataset?.editorQNum) {
+        highlightEditorQuestion(bestEl.dataset.editorQNum, true);
+      }
+    }, { rootMargin: "0px 0px -40% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] });
+
+    document.querySelectorAll("[data-editor-q-num]").forEach((c) => editorObserver.observe(c));
+  };
+
+  renderSections();
+
+  // Закреплённая нижняя панель сохранения (для любых экранов)
+  const stickyBar = el("div", { class: "editor-sticky-bar" },
+    saveMsg,
+    el("div", { class: "editor-sticky-actions" },
+      previewLink,
+      saveBtn));
+
+  // Двухколоночный макет: основная форма слева, боковая панель справа
+  const mainColumn = el("div", { style: "display: grid; gap: 1.5rem;" },
+    topNav,
+    headerCard,
+    sectionsBox);
+
+  const editorLayout = el("div", { class: "test-editor" },
+    el("div", { class: "editor-wrapper-grid" },
+      mainColumn,
+      sidePanel),
+    stickyBar);
+
+  container.replaceChildren(editorLayout);
+}
+
+// ---------- КАРТОЧКА ЗАДАНИЯ (GOOGLE FORMS QUESTION CARD) ----------
+
+function renderQuestionCard({
+  q,
+  displayNum,
+  sec,
+  sIdx,
+  qIdx,
+  isCollapsed,
+  errors,
+  model,
+  onChange,
+  onToggleCollapse,
+  onMoveUp,
+  onMoveDown,
+}) {
+  const card = el("div", {
+    class: `editor-card question-card ${isCollapsed ? "collapsed" : ""} ${errors?.length ? "has-error" : ""}`,
+    id: `q-card-${displayNum}`,
+    "data-editor-q-num": String(displayNum),
+  });
+
+  // Перетаскивание карточки вопроса (Drag and Drop)
+  card.setAttribute("draggable", "true");
+  card.addEventListener("dragstart", (e) => {
+    if (["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(e.target.tagName)) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", JSON.stringify({ type: "question", sIdx, qIdx }));
+    card.classList.add("is-dragging");
+  });
+
+  card.addEventListener("dragend", () => {
+    card.classList.remove("is-dragging");
+    document.querySelectorAll(".question-card").forEach((c) => {
+      c.classList.remove("drag-over-top", "drag-over-bottom");
+    });
+  });
+
+  card.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = card.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    if (relY < rect.height / 2) {
+      card.classList.add("drag-over-top");
+      card.classList.remove("drag-over-bottom");
+    } else {
+      card.classList.add("drag-over-bottom");
+      card.classList.remove("drag-over-top");
+    }
+  });
+
+  card.addEventListener("dragleave", () => {
+    card.classList.remove("drag-over-top", "drag-over-bottom");
+  });
+
+  card.addEventListener("drop", (e) => {
+    e.preventDefault();
+    card.classList.remove("drag-over-top", "drag-over-bottom");
+    let data;
+    try { data = JSON.parse(e.dataTransfer.getData("text/plain")); } catch {}
+    if (!data || data.type !== "question") return;
+
+    const srcSec = model.sections[data.sIdx];
+    const targetSec = sec;
+    if (!srcSec || !targetSec) return;
+
+    const [movedQ] = srcSec.questions.splice(data.qIdx, 1);
+    const rect = card.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    let targetIndex = targetSec.questions.indexOf(q);
+    if (targetIndex === -1) targetIndex = targetSec.questions.length;
+    else if (relY >= rect.height / 2) targetIndex += 1;
+
+    targetSec.questions.splice(targetIndex, 0, movedQ);
+    onChange();
+  });
+
+  // Ручка перетаскивания (⠿ Drag handle)
+  const dragHandle = el("div", {
+    class: "q-drag-handle",
+    title: "Потяните карточку, чтобы изменить порядок заданий",
+  }, "⠿");
+
+  // Кнопка сворачивания
+  const collapseBtn = el("button", {
+    class: "collapse-toggle-btn",
+    type: "button",
+    title: isCollapsed ? "Развернуть задание" : "Свернуть задание",
+    onclick: onToggleCollapse,
+  }, isCollapsed ? "▶" : "▼");
+
+  // Кнопки перемещения вверх / вниз (для быстрого сдвига)
+  const moveUpBtn = el("button", {
+    class: "q-move-btn",
+    type: "button",
+    title: "Переместить вопрос выше",
+    disabled: qIdx === 0,
+    onclick: onMoveUp,
+  }, "▲");
+
+  const moveDownBtn = el("button", {
+    class: "q-move-btn",
+    type: "button",
+    title: "Переместить вопрос ниже",
+    disabled: qIdx === sec.questions.length - 1,
+    onclick: onMoveDown,
+  }, "▼");
+
+  // ID задания
+  const idInput = el("input", {
+    type: "text",
+    value: cleanStr(q.id),
+    style: "max-width: 5rem; padding: 0.35rem 0.5rem;",
+    title: "ID задания в тесте",
+    oninput: () => { q.id = idInput.value; },
+  });
+
+  // Селектор типа вопроса
+  const typeSelect = el("select", {
+    class: "type-selector",
+    onchange: () => {
+      q.type = typeSelect.value;
+      if (q.type === "text") {
+        q.options = [];
+        q.format = cleanStr(q.format) || "число";
+        q.answers = q.answers?.length ? q.answers : ["0"];
+      } else {
+        q.answers = [];
+        q.options = q.options?.length ? q.options : [
+          { md: "Вариант 1", correct: true, note: "" },
+          { md: "Вариант 2", correct: false, note: "" },
+        ];
+      }
+      onChange();
+    },
+  },
+    el("option", { value: "single", selected: q.type === "single" }, "🔘 Один верный"),
+    el("option", { value: "multiple", selected: q.type === "multiple" }, "☑️ Несколько верных"),
+    el("option", { value: "text", selected: q.type === "text" }, "✍️ Краткий ответ"));
+
+  // Сниппет в свернутом виде
+  const snippet = isCollapsed ? el("div", {
+    style: "color: var(--muted); font-size: 0.85rem; max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 0.4rem;",
+  }, (cleanStr(q.text) || "Без текста").replace(/\s+/g, " ")) : null;
+
+  const head = el("div", { class: "question-head" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;" },
+      dragHandle,
+      collapseBtn,
+      el("span", { class: "question-num-badge" }, `№ ${displayNum}`),
+      el("span", { class: "field-label", style: "margin: 0; font-size: 0.8rem;" }, "ID:"),
+      idInput,
+      snippet),
+    el("div", { style: "display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;" },
+      typeSelect,
+      moveUpBtn,
+      moveDownBtn));
+
+  // Баннер ошибок валидации
+  const errorBanner = errors?.length ? el("div", { class: "q-error-banner" },
+    errors.map((e) => el("div", {}, `⚠️ ${e}`))) : null;
+
+  // Сворачиваемое тело задания
+  const bodyWrapper = el("div", { class: "question-body-collapsible" });
+
+  // Поле условия задачи
+  const textInput = el("textarea", {
+    rows: 3,
+    placeholder: "Условие задания. Формулы: $R \\subseteq A^2$ или $$\\sum_{i=1}^n$$",
+    oninput: () => { q.text = textInput.value; },
+  }, cleanStr(q.text));
+
+  // Загрузка картинок
+  const fileInput = el("input", { type: "file", accept: "image/*", style: "display: none;" });
+  const uploadBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    style: "font-size: 0.82rem; padding: 0.35rem 0.65rem;",
+    onclick: () => fileInput.click(),
+  }, "🖼️ Прикрепить изображение");
+
+  const imageStatus = el("span", { style: "font-size: 0.82rem; color: var(--muted);" });
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    imageStatus.textContent = "Загрузка…";
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await json(`/api/tests/${model.id}/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, data: reader.result }),
+        });
+        if (!model.images.includes(res.filename)) model.images.push(res.filename);
+        imageStatus.textContent = `✓ Загружено: ${res.filename}`;
+        const imgMarkdown = `\n\n![${file.name.replace(/\.[^.]+$/, "")}](${res.filename})\n`;
+        textInput.value += imgMarkdown;
+        q.text = textInput.value;
+      } catch (err) {
+        imageStatus.textContent = `Ошибка: ${err.message}`;
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const uploadBox = el("div", { style: "display: flex; align-items: center; gap: 0.6rem; margin-top: 0.4rem;" },
+    fileInput,
+    uploadBtn,
+    imageStatus);
+
+  const questionConditionBox = el("div", {},
+    el("label", {},
+      el("span", { class: "field-label" }, "Условие задания:"),
+      textInput),
+    uploadBox);
+
+  // Контейнер вариантов ответа
+  const optionsContainer = el("div", { class: "q-options-container" });
+
+  if (q.type === "single" || q.type === "multiple") {
+    const isSingle = q.type === "single";
+    const optHeader = el("div", { class: "q-options-header" },
+      isSingle ? "Варианты ответа (выберите 1 верный):" : "Варианты ответа (отметьте верные):");
+    const optRows = el("div", { style: "display: flex; flex-direction: column; gap: 0.5rem;" });
+
+    q.options.forEach((opt, oIdx) => {
+      const optDrag = el("div", {
+        class: "opt-drag-handle",
+        draggable: "true",
+        title: "Потяните, чтобы изменить порядок вариантов ответа",
+      }, "⠿");
+
+      const mark = el("input", {
+        class: "opt-mark",
+        type: isSingle ? "radio" : "checkbox",
+        name: `correct_${displayNum}`,
+        checked: Boolean(opt.correct),
+        onchange: () => {
+          if (isSingle) {
+            q.options.forEach((o, i) => { o.correct = (i === oIdx); });
+          } else {
+            opt.correct = mark.checked;
+          }
+        },
+      });
+
+      const optText = el("input", {
+        class: "opt-input",
+        type: "text",
+        value: cleanStr(opt.md),
+        placeholder: `Вариант ${oIdx + 1}`,
+        oninput: () => { opt.md = optText.value; },
+      });
+
+      const delOptBtn = el("button", {
+        class: "opt-del-btn",
+        type: "button",
+        title: "Удалить вариант ответа",
+        onclick: () => {
+          if (q.options.length > 2) {
+            q.options.splice(oIdx, 1);
+            onChange();
+          } else {
+            alert("В задании должно быть не менее двух вариантов.");
+          }
+        },
+      }, "✕");
+
+      const row = el("div", { class: "opt-row", draggable: "true" }, optDrag, mark, optText, delOptBtn);
+
+      // Drag and Drop для вариантов ответа
+      row.addEventListener("dragstart", (e) => {
+        if (["INPUT", "BUTTON"].includes(e.target.tagName)) {
+          e.preventDefault();
+          return;
+        }
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", JSON.stringify({ type: "option", oIdx }));
+        row.classList.add("is-dragging");
+      });
+
+      row.addEventListener("dragend", (e) => {
+        e.stopPropagation();
+        row.classList.remove("is-dragging");
+        optRows.querySelectorAll(".opt-row").forEach((r) => {
+          r.classList.remove("drag-over-top", "drag-over-bottom");
+        });
+      });
+
+      row.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        const rect = row.getBoundingClientRect();
+        if (e.clientY - rect.top < rect.height / 2) {
+          row.classList.add("drag-over-top");
+          row.classList.remove("drag-over-bottom");
+        } else {
+          row.classList.add("drag-over-bottom");
+          row.classList.remove("drag-over-top");
+        }
+      });
+
+      row.addEventListener("dragleave", (e) => {
+        e.stopPropagation();
+        row.classList.remove("drag-over-top", "drag-over-bottom");
+      });
+
+      row.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.remove("drag-over-top", "drag-over-bottom");
+        let data;
+        try { data = JSON.parse(e.dataTransfer.getData("text/plain")); } catch {}
+        if (!data || data.type !== "option" || data.oIdx === undefined) return;
+        const srcIdx = data.oIdx;
+        const [movedOpt] = q.options.splice(srcIdx, 1);
+        const rect = row.getBoundingClientRect();
+        let targetIdx = q.options.indexOf(opt);
+        if (targetIdx === -1) targetIdx = q.options.length;
+        else if (e.clientY - rect.top >= rect.height / 2) targetIdx += 1;
+        q.options.splice(targetIdx, 0, movedOpt);
+        onChange();
+      });
+
+      optRows.append(row);
+    });
+
+    const addOptBtn = el("button", {
+      class: "btn quiet",
+      type: "button",
+      style: "font-size: 0.85rem; padding: 0.4rem 0.8rem; align-self: flex-start;",
+      onclick: () => {
+        q.options.push({ md: `Вариант ${q.options.length + 1}`, correct: false, note: "" });
+        onChange();
+      },
+    }, "+ Добавить вариант ответа");
+
+    optionsContainer.append(optHeader, optRows, addOptBtn);
+  } else {
+    // Краткий ответ
+    const formatInput = el("input", {
+      type: "text",
+      value: cleanStr(q.format) || "число",
+      placeholder: "например: число или {множество через запятую}",
+      oninput: () => { q.format = formatInput.value; },
+    });
+
+    const answersList = el("div", { style: "display: grid; gap: 0.4rem; margin-top: 0.4rem;" });
+    (q.answers || []).forEach((ans, aIdx) => {
+      const aInput = el("input", {
+        type: "text",
+        value: cleanStr(ans),
+        placeholder: "Правильный ответ",
+        oninput: () => { q.answers[aIdx] = aInput.value; },
+      });
+      const delAnsBtn = el("button", {
+        class: "opt-del-btn",
+        type: "button",
+        onclick: () => {
+          if (q.answers.length > 1) {
+            q.answers.splice(aIdx, 1);
+            onChange();
+          }
+        },
+      }, "✕");
+      answersList.append(el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" }, aInput, delAnsBtn));
+    });
+
+    const addAnsBtn = el("button", {
+      class: "btn quiet",
+      type: "button",
+      style: "font-size: 0.85rem; padding: 0.35rem 0.75rem; align-self: flex-start; margin-top: 0.3rem;",
+      onclick: () => {
+        q.answers = q.answers || [];
+        q.answers.push("");
+        onChange();
+      },
+    }, "+ Добавить вариант записи ответа");
+
+    optionsContainer.append(
+      el("label", {}, el("span", { class: "field-label" }, "Формат ответа (обязательно):"), formatInput),
+      el("div", { style: "margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem;" },
+        el("span", { class: "field-label" }, "Правильные ответы:"),
+        answersList,
+        addAnsBtn));
+  }
+
+  // Секция «Дополнительно»: примечания к вариантам, подсказки и разбор решения
+  const hasNotes = (q.options || []).some((o) => cleanStr(o.note));
+  const hasHints = (q.hints || []).some((h) => cleanStr(h));
+  const hasExpl = Boolean(cleanStr(q.explanation));
+  const hasExtras = hasNotes || hasHints || hasExpl;
+
+  const extrasDetails = el("details", { class: "q-extras", ...(hasExtras ? { open: "" } : {}) });
+  const extrasSummary = el("summary", { class: "q-extras-summary" },
+    el("span", {}, `⚙️ Пояснения к вариантам, подсказки и разбор ${hasExtras ? "✓" : ""}`));
+
+  const extrasContent = el("div", { class: "q-extras-content" });
+
+  // Примечания к вариантам (если выбор)
+  if (q.type === "single" || q.type === "multiple") {
+    const notesBox = el("div", { style: "display: flex; flex-direction: column; gap: 0.4rem;" },
+      el("span", { class: "field-label" }, "Пояснения к вариантам при ошибке студента:"));
+    q.options.forEach((opt, oIdx) => {
+      const noteInput = el("input", {
+        type: "text",
+        value: cleanStr(opt.note),
+        placeholder: `Пояснение, если выбран «${cleanStr(opt.md) || `Вариант ${oIdx + 1}`}» (необязательно)`,
+        oninput: () => { opt.note = noteInput.value; },
+      });
+      notesBox.append(el("div", { style: "display: flex; align-items: center; gap: 0.5rem;" },
+        el("span", { style: "font-size: 0.8rem; color: var(--muted); min-width: 5rem;" }, `Вариант ${oIdx + 1}:`),
+        noteInput));
+    });
+    extrasContent.append(notesBox);
+  }
+
+  // Подсказки
+  const hintsBox = el("div", { style: "display: flex; flex-direction: column; gap: 0.4rem;" });
+  const hintsList = el("div", { style: "display: grid; gap: 0.4rem;" });
+  (q.hints || []).forEach((h, hIdx) => {
+    const hInput = el("input", {
+      type: "text",
+      value: cleanStr(h),
+      placeholder: `Подсказка ${hIdx + 1}`,
+      oninput: () => { q.hints[hIdx] = hInput.value; },
+    });
+    const delHintBtn = el("button", {
+      class: "opt-del-btn",
+      type: "button",
+      onclick: () => { q.hints.splice(hIdx, 1); onChange(); },
+    }, "✕");
+    hintsList.append(el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" }, hInput, delHintBtn));
+  });
+
+  const addHintBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    style: "font-size: 0.82rem; padding: 0.3rem 0.65rem; align-self: flex-start;",
+    onclick: () => {
+      q.hints = q.hints || [];
+      q.hints.push("");
+      onChange();
+    },
+  }, "+ Добавить подсказку");
+
+  hintsBox.append(
+    el("span", { class: "field-label" }, "Подсказки для режима «Тренировка»:"),
+    hintsList,
+    addHintBtn);
+
+  // Разбор / Пояснение
+  const explInput = el("textarea", {
+    rows: 2,
+    placeholder: "Подробный разбор решения (показывается после завершения теста)",
+    oninput: () => { q.explanation = explInput.value; },
+  }, cleanStr(q.explanation));
+
+  const explBox = el("label", {},
+    el("span", { class: "field-label" }, "Полный разбор задания (Пояснение):"),
+    explInput);
+
+  extrasContent.append(hintsBox, explBox);
+  extrasDetails.append(extrasSummary, extrasContent);
+
+  // Подвал карточки: понятные кнопки «Копировать задание» и «Удалить задание»
+  const dupBtn = el("button", {
+    class: "q-footer-btn",
+    type: "button",
+    title: "Создать точную копию этого задания со всеми вариантами",
+    onclick: () => {
+      const copy = JSON.parse(JSON.stringify(q));
+      copy.id = `${q.id}-copy`;
+      const currentSec = model.sections.find((s) => s.questions.includes(q));
+      if (currentSec) {
+        const idx = currentSec.questions.indexOf(q);
+        currentSec.questions.splice(idx + 1, 0, copy);
+        onChange();
+      }
+    },
+  }, "📋 Копировать задание");
+
+  const delBtn = el("button", {
+    class: "q-footer-btn q-del-btn",
+    type: "button",
+    title: "Безвозвратно удалить это задание из теста",
+    onclick: () => {
+      if (confirm(`Удалить задание № ${displayNum}?`)) {
+        const currentSec = model.sections.find((s) => s.questions.includes(q));
+        if (currentSec) {
+          currentSec.questions = currentSec.questions.filter((item) => item !== q);
+          onChange();
+        }
+      }
+    },
+  }, "🗑️ Удалить задание");
+
+  const cardFooter = el("div", { class: "q-card-footer" },
+    el("div", { class: "muted", style: "font-size: 0.82rem;" }, `Задание № ${displayNum} • ID: ${cleanStr(q.id)}`),
+    el("div", { class: "q-card-footer-actions" }, dupBtn, delBtn));
+
+  bodyWrapper.append(questionConditionBox, optionsContainer, extrasDetails, cardFooter);
+  card.append(head, errorBanner, bodyWrapper);
+  return card;
+}
+
+// ==========================================
+// 3. ВКЛАДКА: КОНСПЕКТЫ И ТЕОРИЯ (YouNote)
+// ==========================================
+
+function fallbackMarkdown(text) {
+  // Горизонтальный разделитель
+  text = text.replace(/^(?:---|___|\*\*\*)$/gm, "<hr>");
+
+  // Заголовки
+  text = text.replace(/^### (.*$)/gim, "<h3>$1</h3>");
+  text = text.replace(/^## (.*$)/gim, "<h2>$1</h2>");
+  text = text.replace(/^# (.*$)/gim, "<h1>$1</h1>");
+
+  // Полужирный, курсив, зачеркивание, код
+  text = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/\*(.*?)\*/g, "<em>$1</em>");
+  text = text.replace(/~~(.*?)~~/g, "<del>$1</del>");
+  text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // Изображения и ссылки
+  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width: 100%; border-radius: 8px;">');
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // Таблицы Markdown
+  text = text.replace(/((?:\|[^\n]+\|\r?\n?)+)/g, (tbl) => {
+    const lines = tbl.trim().split(/\r?\n/);
+    if (lines.length < 2) return tbl;
+    const headerCells = lines[0].split("|").slice(1, -1).map((c) => `<th>${c.trim()}</th>`).join("");
+    const isAlignLine = /^\|[\s\-:]+\|\s*$/.test(lines[1]);
+    const bodyStart = isAlignLine ? 2 : 1;
+    let rows = "";
+    for (let i = bodyStart; i < lines.length; i++) {
+      const cells = lines[i].split("|").slice(1, -1).map((c) => `<td>${c.trim()}</td>`).join("");
+      rows += `<tr>${cells}</tr>`;
+    }
+    return `<table class="doc-table"><thead><tr>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`;
+  });
+
+  // Списки
+  text = text.replace(/^\s*-\s+(.*$)/gim, "<li>$1</li>");
+  text = text.replace(/^\s*\d+\.\s+(.*$)/gim, "<li>$1</li>");
+
+  // Абзацы
+  text = text.split(/\n\s*\n/).map((p) => {
+    p = p.trim();
+    if (!p) return "";
+    if (p.startsWith("<h") || p.startsWith("<div") || p.startsWith("<pre") || p.startsWith("<li") || p.startsWith("<table") || p.startsWith("<hr")) return p;
+    return `<p>${p.replace(/\n/g, "<br>")}</p>`;
+  }).join("\n");
+
+  return text;
+}
+
+function renderMarkdownPreview(rawMd) {
+  let text = String(rawMd || "");
+
+  // 0. Нормализация автономных callout-блоков (без ведущей '>')
+  text = text.replace(/(?:^|\n)([ \t]*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][^\n]*(?:\n[^\n]+)*)/gi, (m, block) => {
+    const lines = block.split("\n");
+    const quoted = lines.map((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith(">")) return line;
+      return "> " + line;
+    }).join("\n");
+    return "\n" + quoted;
+  });
+
+  // 1. Сохранение формул KaTeX через плейсхолдеры, чтобы парсер разметки не ломал спецсимволы
+  const mathMap = new Map();
+  let mathCounter = 0;
+
+  // Выключные формулы $$...$$
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {
+    const key = `%%MATH_BLOCK_${mathCounter++}%%`;
+    let html = "";
+    if (window.katex) {
+      try {
+        html = `<div class="katex-display">${window.katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false })}</div>`;
+      } catch (e) {
+        html = `<pre class="math-error">${tex}</pre>`;
+      }
+    } else {
+      html = `<div class="katex-display">$$${tex}$$</div>`;
+    }
+    mathMap.set(key, html);
+    return key;
+  });
+
+  // Строчные формулы $...$
+  text = text.replace(/\$([^\$\n]+?)\$/g, (m, tex) => {
+    const key = `%%MATH_INLINE_${mathCounter++}%%`;
+    let html = "";
+    if (window.katex) {
+      try {
+        html = window.katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
+      } catch (e) {
+        html = `<code>$${tex}$</code>`;
+      }
+    } else {
+      html = `<code>$${tex}$</code>`;
+    }
+    mathMap.set(key, html);
+    return key;
+  });
+
+  const parseMd = (str) => {
+    if (window.marked) {
+      const parseFn = typeof window.marked.parse === "function" ? window.marked.parse : window.marked;
+      return parseFn(str, { gfm: true, breaks: true });
+    }
+    return fallbackMarkdown(str);
+  };
+
+  // 2. Callout-блоки: > [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING], > [!CAUTION]
+  const calloutMap = new Map();
+  let calloutCounter = 0;
+  const icons = { note: "ℹ️", tip: "💡", important: "📌", warning: "⚠️", caution: "🛑" };
+  const titles = { note: "Заметка", tip: "Совет", important: "Важно", warning: "Внимание", caution: "Осторожно" };
+
+  text = text.replace(/^>[ \t]*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][^\n]*(?:\n(?:>[^\n]*(?:\n|$))*|$)/gim, (fullMatch) => {
+    const lines = fullMatch.split("\n");
+    const firstLine = lines[0] || "";
+    const typeMatch = firstLine.match(/\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
+    const type = typeMatch ? typeMatch[1].toLowerCase() : "note";
+    const headerExtra = firstLine.replace(/^>[ \t]*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i, "").trim();
+
+    const bodyLines = [];
+    if (headerExtra) bodyLines.push(headerExtra);
+    for (let i = 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (/^>[ \t]?/.test(l)) {
+        bodyLines.push(l.replace(/^>[ \t]?/, ""));
+      } else if (l.trim()) {
+        bodyLines.push(l);
+      }
+    }
+    const cleanBody = bodyLines.join("\n").trim();
+    const bodyHtml = parseMd(cleanBody);
+    const calloutHtml = `<div class="note-callout callout-${type}">\n  <div class="callout-header"><span class="callout-icon">${icons[type] || "ℹ️"}</span> <span class="callout-title">${titles[type] || type}</span></div>\n  <div class="callout-body">\n${bodyHtml}\n  </div>\n</div>`;
+
+    const key = `%%CALLOUT_BLOCK_${calloutCounter++}%%`;
+    calloutMap.set(key, calloutHtml);
+    return `\n\n${key}\n\n`;
+  });
+
+  // 3. Рендеринг основного Markdown
+  let htmlResult = parseMd(text);
+
+  // 4. Восстановление callout-блоков
+  for (const [key, rendered] of calloutMap.entries()) {
+    htmlResult = htmlResult.replace(new RegExp(`<p>\\s*${key}\\s*<\\/p>|${key}`, "g"), rendered);
+  }
+
+  // 5. Восстановление KaTeX формул из плейсхолдеров
+  for (const [key, rendered] of mathMap.entries()) {
+    htmlResult = htmlResult.split(key).join(rendered);
+  }
+
+  return htmlResult;
+}
+
+async function notesTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем список конспектов…"));
+  let list = [];
+  try {
+    const res = await json("/api/notes");
+    list = Array.isArray(res) ? res : (res.notes || []);
+  } catch {
+    try {
+      list = await json("notes.json");
+    } catch (err) {
+      container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки конспектов: ${err.message}`));
+      return;
+    }
+  }
+
+  const createBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: () => createNewNotePrompt(container),
+  }, "➕ Создать новый конспект");
+
+  const head = el("div", { class: "test-manager-head" },
+    el("div", {},
+      el("h2", { style: "margin: 0;" }, "Управление конспектами и теорией"),
+      el("p", { class: "muted", style: "margin: 0.2rem 0 0;" }, "Создавайте и редактируйте лекции и конспекты курса дискретной математики")),
+    createBtn);
+
+  // Сбор тем/папок конспектов
+  const topicsSet = new Set();
+  for (const n of list) {
+    if (n.topic && n.topic.trim()) topicsSet.add(n.topic.trim());
+  }
+  const topics = ["Все", ...Array.from(topicsSet)];
+  let activeTopic = "Все";
+
+  const tabsContainer = el("div", { class: "topic-tabs", style: "margin-bottom: 1.25rem;" });
+  const grid = el("div", { class: "note-cards-admin-grid" });
+
+  function renderCards() {
+    const filtered = activeTopic === "Все"
+      ? list
+      : list.filter((n) => (n.topic || "Общее") === activeTopic);
+
+    grid.replaceChildren();
+
+    if (!filtered.length) {
+      grid.replaceChildren(el("p", { class: "muted", style: "grid-column: 1 / -1; padding: 2rem; text-align: center;" }, "В этой теме пока нет конспектов."));
+      return;
+    }
+
+    for (const n of filtered) {
+      const card = el("div", { class: "note-admin-card" },
+        el("div", { style: "display: flex; gap: 0.85rem; align-items: flex-start;" },
+          el("span", { style: "font-size: 2.2rem; line-height: 1;" }, n.icon || "📄"),
+          el("div", { style: "flex: 1; min-width: 0;" },
+            el("div", { style: "font-size: 1.15rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.35rem;" }, n.title || n.id),
+            el("div", { style: "display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;" },
+              el("span", { class: "tag tag-accent" }, `📁 ${n.topic || "Общее"}`),
+              el("span", { class: "tag" }, `Порядок: №${n.order || 1}`),
+              n.hidden ? el("span", { class: "tag", style: "background: var(--bad-soft); color: var(--bad); font-weight: 600;" }, "Скрыт") : null),
+            el("p", { class: "muted", style: "margin: 0; font-size: 0.88rem; line-height: 1.45;" }, n.description || "Без описания"))),
+        el("div", { class: "test-card-actions" },
+          el("button", {
+            class: "btn primary btn-sm",
+            type: "button",
+            onclick: () => openNoteEditor(n.id, container),
+          }, "✏️ Редактировать"),
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: () => openPreviewModal(`notes/?id=${encodeURIComponent(n.id)}`, n.title || n.id),
+          }, "🔍 Просмотр"),
+          el("button", {
+            class: `btn btn-sm btn-visibility-toggle ${n.hidden ? "is-hidden" : "is-visible"}`,
+            type: "button",
+            title: n.hidden ? "Конспект скрыт для студентов. Нажмите, чтобы открыть." : "Конспект виден студентам. Нажмите, чтобы скрыть.",
+            onclick: async () => {
+              try {
+                await json(`/api/notes/${encodeURIComponent(n.id)}`, {
+                  method: "PUT",
+                  body: { hidden: !n.hidden },
+                });
+                notesTab(container);
+              } catch (e) {
+                alert(`Ошибка изменения видимости конспекта: ${e.message}`);
+              }
+            },
+          }, n.hidden ? "🙈 Скрыт" : "👁️ Виден"),
+          el("button", {
+            class: "btn quiet btn-sm btn-delete-action",
+            type: "button",
+            style: "color: var(--bad); margin-left: auto;",
+            title: "Удалить конспект",
+            onclick: () => deleteNoteConfirm(n.id, container),
+          }, "🗑️")));
+      grid.append(card);
+    }
+  }
+
+  function renderTabs() {
+    tabsContainer.replaceChildren(
+      ...topics.map((tp) => el("button", {
+        class: `topic-tab ${tp === activeTopic ? "active" : ""}`,
+        type: "button",
+        onclick: () => { activeTopic = tp; renderTabs(); renderCards(); },
+      }, tp === "Все" ? "Все темы" : `📁 ${tp}`))
+    );
+  }
+
+  renderTabs();
+  renderCards();
+
+  container.replaceChildren(head, topics.length > 1 ? tabsContainer : el("span"), grid);
+}
+
+async function createNewNotePrompt(container) {
+  const idInput = el("input", { type: "text", placeholder: "logic-laws", required: true });
+  const titleInput = el("input", { type: "text", placeholder: "Законы алгебры логики", required: true });
+  const topicInput = el("input", { type: "text", placeholder: "Булева логика (необязательно)" });
+  const iconInput = el("input", { type: "text", placeholder: "⚡", value: "📄", style: "width: 4rem; text-align: center;" });
+  const status = el("p", { class: "field-error" });
+
+  const modal = el("dialog", {
+    style: "border: 0; border-radius: var(--radius-lg); padding: 1.5rem; max-width: 28rem; width: 90vw; background: var(--card); box-shadow: var(--shadow-lg);",
+  },
+    el("h2", { style: "margin-top: 0;" }, "Новый конспект"),
+    el("p", { class: "muted" }, "Задайте идентификатор для ссылки, название и тему:"),
+    el("form", {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const id = idInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+        const title = titleInput.value.trim();
+        const topic = topicInput.value.trim() || "Общее";
+        const icon = iconInput.value.trim() || "📄";
+        if (!id || !title) {
+          status.textContent = "Заполните ID и название";
+          return;
+        }
+        try {
+          const res = await json("/api/notes", {
+            method: "POST",
+            body: {
+              id,
+              title,
+              topic,
+              icon,
+              order: 1,
+              description: "Краткое описание темы.",
+              rawMd: `# ${title}\n\nТекст конспекта...\n\n## 1. Введение\n\nТеоретический материал с формулами $x \\in A$.\n`,
+            },
+          });
+          modal.close();
+          modal.remove();
+          openNoteEditor(res.id, container);
+        } catch (err) {
+          status.textContent = err.message;
+        }
+      },
+    },
+      el("label", {}, el("span", { class: "field-label" }, "Идентификатор (латиница, цифры, дефис):"), idInput),
+      el("label", {}, el("span", { class: "field-label" }, "Название конспекта:"), titleInput),
+      el("div", { style: "display: flex; gap: 0.6rem;" },
+        el("label", { style: "width: 5rem;" }, el("span", { class: "field-label" }, "Иконка:"), iconInput),
+        el("label", { style: "flex: 1;" }, el("span", { class: "field-label" }, "Тема/раздел:"), topicInput)),
+      status,
+      el("div", { style: "display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem;" },
+        el("button", { class: "btn quiet", type: "button", onclick: () => { modal.close(); modal.remove(); } }, "Отмена"),
+        el("button", { class: "btn primary", type: "submit" }, "Создать конспект"))));
+
+  document.body.append(modal);
+  modal.showModal();
+}
+
+async function openNoteEditor(noteId, container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем конспект…"));
+  let noteData;
+  try {
+    noteData = await json(`/api/notes/${noteId}`);
+  } catch (err) {
+    container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки конспекта: ${err.message}`));
+    return;
+  }
+
+  const meta = noteData.meta || {};
+  let currentRawMd = noteData.rawMd || "";
+  let viewMode = "split"; // "edit" | "split" | "preview"
+  let isDirty = false;
+  const draftKey = `note_draft_${noteId}`;
+
+  const saveStatus = el("span", { class: "save-msg", style: "font-size: 0.88rem;" }, "");
+
+  const markDirty = () => {
+    if (!isDirty) {
+      isDirty = true;
+      saveStatus.textContent = "● Не сохранено";
+      saveStatus.style.color = "var(--warn-ink, #b45309)";
+    }
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        rawMd: currentRawMd,
+        title: titleInput.value,
+        topic: topicInput.value,
+        order: orderInput.value,
+        desc: descInput.value,
+        icon: iconInput.value,
+        time: Date.now(),
+      }));
+    } catch {}
+  };
+
+  const beforeUnloadHandler = (e) => {
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  };
+  window.addEventListener("beforeunload", beforeUnloadHandler);
+
+  const cleanupAndLeave = () => {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+    window.removeEventListener("keydown", keyHandler);
+    notesTab(container);
+  };
+
+  // Верхняя навигация
+  const backBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    onclick: () => {
+      if (isDirty) {
+        const ok = confirm("У вас есть несохранённые изменения в конспекте.\n\nВы действительно хотите выйти без сохранения?");
+        if (!ok) return;
+      }
+      cleanupAndLeave();
+    },
+  }, "← Ко всем конспектам");
+
+  const hiddenCheckbox = el("input", {
+    type: "checkbox",
+    checked: Boolean(meta.hidden),
+    onchange: () => {
+      markDirty();
+      updateHideBtn();
+    },
+  });
+
+  const hideBtn = el("button", {
+    class: "btn btn-sm btn-visibility-toggle",
+    type: "button",
+    title: "Скрыть / показать конспект на главной",
+    onclick: () => {
+      hiddenCheckbox.checked = !hiddenCheckbox.checked;
+      markDirty();
+      updateHideBtn();
+    },
+  });
+
+  function updateHideBtn() {
+    hideBtn.textContent = hiddenCheckbox.checked ? "🙈 Скрыт для студентов" : "👁️ Виден на главной";
+    hideBtn.className = `btn btn-sm btn-visibility-toggle ${hiddenCheckbox.checked ? "is-hidden" : "is-visible"}`;
+  }
+  updateHideBtn();
+
+  const previewLink = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: () => openPreviewModal(`notes/?id=${encodeURIComponent(noteId)}`, meta.title || noteId),
+  }, "🔍 Предпросмотр");
+
+  const saveBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: async () => {
+      saveBtn.disabled = true;
+      saveStatus.textContent = "Сохранение…";
+      saveStatus.style.color = "var(--muted)";
+      try {
+        await json(`/api/notes/${noteId}`, {
+          method: "PUT",
+          body: {
+            meta: {
+              title: titleInput.value.trim() || noteId,
+              topic: topicInput.value.trim() || "Общее",
+              icon: iconInput.value.trim() || "📄",
+              order: Number(orderInput.value) || 1,
+              description: descInput.value.trim(),
+              hidden: hiddenCheckbox.checked,
+            },
+            rawMd: currentRawMd,
+          },
+        });
+        isDirty = false;
+        try { localStorage.removeItem(draftKey); } catch {}
+        saveStatus.textContent = "✅ Сохранено";
+        saveStatus.style.color = "var(--ok)";
+        setTimeout(() => {
+          if (!isDirty) saveStatus.textContent = "";
+        }, 3000);
+      } catch (err) {
+        saveStatus.textContent = `❌ Ошибка: ${err.message}`;
+        saveStatus.style.color = "var(--bad)";
+      } finally {
+        saveBtn.disabled = false;
+      }
+    },
+  }, "💾 Сохранить");
+
+  // Переключатель режимов отображения (вынесен отдельно от панели Word)
+  const segEdit = el("button", {
+    class: "doc-seg-btn",
+    type: "button",
+    title: "Редактирование во всю ширину с панелью Word",
+    onclick: () => switchViewMode("edit"),
+  }, "✏️ Редактирование");
+
+  const segSplit = el("button", {
+    class: "doc-seg-btn active",
+    type: "button",
+    title: "Редактор слева + живой результат справа",
+    onclick: () => switchViewMode("split"),
+  }, "↔️ Сплит");
+
+  const segPreview = el("button", {
+    class: "doc-seg-btn",
+    type: "button",
+    title: "Вид готовой статьи без лишних элементов",
+    onclick: () => switchViewMode("preview"),
+  }, "👁️ Предпросмотр");
+
+  const viewSegmented = el("div", { class: "doc-view-segmented" }, segEdit, segSplit, segPreview);
+
+  const topbar = el("div", { class: "doc-editor-topbar" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;" },
+      backBtn,
+      el("span", { class: "muted" }, "•"),
+      el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, `Конспект: ${meta.title || noteId}`)),
+    el("div", { style: "display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;" },
+      viewSegmented,
+      saveStatus,
+      hideBtn,
+      previewLink,
+      saveBtn));
+
+  // Заголовок документа
+  const titleInput = el("input", {
+    class: "doc-title-input",
+    type: "text",
+    value: meta.title || "",
+    placeholder: "Название конспекта…",
+    oninput: markDirty,
+  });
+
+  // Панель метаданных
+  const iconInput = el("input", {
+    class: "doc-meta-input",
+    type: "text",
+    value: meta.icon || "📄",
+    title: "Иконка темы",
+    style: "width: 3.5rem; text-align: center; font-size: 1.2rem;",
+    oninput: markDirty,
+  });
+
+  const topicInput = el("input", {
+    class: "doc-meta-input",
+    type: "text",
+    value: meta.topic || "Общее",
+    placeholder: "Тема (например: Множества, Отношения)",
+    style: "min-width: 14rem;",
+    oninput: markDirty,
+  });
+
+  const orderInput = el("input", {
+    class: "doc-meta-input",
+    type: "number",
+    value: String(meta.order || 1),
+    placeholder: "№",
+    style: "width: 5rem;",
+    title: "Порядковый номер в курсе",
+    oninput: markDirty,
+  });
+
+  const descInput = el("input", {
+    class: "doc-meta-input",
+    type: "text",
+    value: meta.description || "",
+    placeholder: "Краткое описание темы (для карточки на главной)…",
+    style: "flex: 1; min-width: 18rem;",
+    oninput: markDirty,
+  });
+
+  const metaBox = el("div", { class: "doc-meta-box" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;" },
+      el("span", { class: "muted", style: "font-size: 0.82rem;" }, "Иконка:"),
+      iconInput,
+      el("span", { class: "muted", style: "font-size: 0.82rem;" }, "Раздел:"),
+      topicInput,
+      el("span", { class: "muted", style: "font-size: 0.82rem;" }, "Порядок:"),
+      orderInput),
+    el("div", { style: "display: flex; align-items: center; gap: 0.75rem; width: 100%; margin-top: 0.4rem; flex-wrap: wrap;" },
+      descInput,
+      el("label", { style: "display: flex; align-items: center; gap: 0.4rem; cursor: pointer; white-space: nowrap;" },
+        hiddenCheckbox,
+        el("span", { class: "field-label", style: "margin: 0; font-size: 0.88rem;" }, "Скрыть на главной"))));
+
+  // Текстовая область Markdown
+  const textarea = el("textarea", {
+    class: "doc-main-textarea",
+    rows: 24,
+    placeholder: "Пишите текст конспекта. Поддерживаются формулы $...$ и $$...$$, цитаты > [!NOTE], таблицы и картинки.",
+    value: currentRawMd,
+    oninput: () => {
+      currentRawMd = textarea.value;
+      updateLivePreview();
+      markDirty();
+    },
+  });
+
+  const livePreview = el("div", { class: "doc-live-preview" });
+
+  const updateLivePreview = () => {
+    livePreview.innerHTML = renderMarkdownPreview(currentRawMd);
+  };
+  updateLivePreview();
+
+  // Функция вставки для панели Word
+  const insertDocText = (before, after = "") => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const sel = textarea.value.substring(start, end);
+    const replacement = before + (sel || "") + after;
+    textarea.setRangeText(replacement, start, end, "select");
+    currentRawMd = textarea.value;
+    updateLivePreview();
+    markDirty();
+    textarea.focus();
+  };
+
+  // Панель инструментов Word / Google Docs
+  const headingSelect = el("select", {
+    class: "doc-select",
+    title: "Стиль текста",
+    onchange: (e) => {
+      const val = e.target.value;
+      if (val === "h1") insertDocText("# ", "\n");
+      else if (val === "h2") insertDocText("## ", "\n");
+      else if (val === "h3") insertDocText("### ", "\n");
+      e.target.value = "p";
+    },
+  },
+    el("option", { value: "p" }, "Обычный текст"),
+    el("option", { value: "h1" }, "Заголовок 1 (Раздел)"),
+    el("option", { value: "h2" }, "Заголовок 2 (Подраздел)"),
+    el("option", { value: "h3" }, "Заголовок 3 (Пункт)"));
+
+  const fileInput = el("input", {
+    type: "file",
+    accept: "image/*",
+    style: "display: none;",
+    onchange: async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const uploadRes = await json(`/api/notes/${noteId}/upload`, {
+            method: "POST",
+            body: { filename: file.name, data: reader.result },
+          });
+          insertDocText(`\n![${file.name}](${uploadRes.url})\n`);
+        } catch (err) {
+          alert(`Ошибка загрузки картинки: ${err.message}`);
+        }
+      };
+      reader.readAsDataURL(file);
+    },
+  });
+
+  const toolbar = el("div", { class: "doc-word-toolbar" },
+    el("div", { class: "doc-tool-group" }, headingSelect),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Полужирный (Ctrl+B)", onclick: () => insertDocText("**", "**") }, el("strong", {}, "Ж")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Курсив (Ctrl+I)", onclick: () => insertDocText("*", "*") }, el("em", {}, "К")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Подчёркнутый", onclick: () => insertDocText("<u>", "</u>") }, el("u", {}, "Ч")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Зачёркнутый", onclick: () => insertDocText("~~", "~~") }, el("s", {}, "З")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Встроенный код", onclick: () => insertDocText("`", "`") }, "< >")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Маркированный список", onclick: () => insertDocText("- ") }, "• Список"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Нумерованный список", onclick: () => insertDocText("1. ") }, "1. Список"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Таблица", onclick: () => insertDocText("\n| Колонка 1 | Колонка 2 |\n| :--- | :--- |\n| Текст 1 | Текст 2 |\n") }, "▦ Таблица")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Формула в строке: $...$", onclick: () => insertDocText("$", "$") }, "∑ Формула"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Блок формулы: $$...$$", onclick: () => insertDocText("$$\n", "\n$$") }, "∫ Блок формулы"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка примечания", onclick: () => insertDocText("> [!NOTE]\n> ") }, "ℹ️ Заметка"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка совета", onclick: () => insertDocText("> [!TIP]\n> ") }, "💡 Совет"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка важно / теорема", onclick: () => insertDocText("> [!IMPORTANT]\n> ") }, "📌 Важно"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка предупреждения", onclick: () => insertDocText("> [!WARNING]\n> ") }, "⚠️ Внимание")),
+    el("div", { class: "doc-tool-group" },
+      el("label", { class: "doc-tool-btn", style: "cursor: pointer;", title: "Загрузить иллюстрацию к конспекту" },
+        "🖼️ Фото",
+        fileInput),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Горизонтальный разделитель", onclick: () => insertDocText("\n---\n") }, "— Черта")));
+
+  const editorBodyContainer = el("div", { class: `doc-body-container mode-${viewMode}` },
+    textarea,
+    livePreview);
+
+  const switchViewMode = (mode) => {
+    viewMode = mode;
+    segEdit.classList.toggle("active", mode === "edit");
+    segSplit.classList.toggle("active", mode === "split");
+    segPreview.classList.toggle("active", mode === "preview");
+
+    editorBodyContainer.className = `doc-body-container mode-${mode}`;
+    toolbar.style.display = mode === "preview" ? "none" : "";
+    metaBox.style.display = mode === "preview" ? "none" : "";
+    titleInput.readOnly = mode === "preview";
+  };
+
+  // Горячая клавиша Ctrl+S / Cmd+S
+  const keyHandler = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveBtn.click();
+    }
+  };
+  window.addEventListener("keydown", keyHandler);
+
+  // Проверка сохранённого черновика в localStorage
+  let draftBanner = null;
+  try {
+    const savedDraft = JSON.parse(localStorage.getItem(draftKey));
+    if (savedDraft && savedDraft.rawMd && savedDraft.rawMd !== currentRawMd) {
+      const timeStr = new Date(savedDraft.time || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      draftBanner = el("div", {
+        style: "background: color-mix(in srgb, var(--accent) 15%, var(--card)); border: 1px solid var(--accent); padding: 0.75rem 1.1rem; border-radius: var(--radius); display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; font-size: 0.9rem;",
+      },
+        el("span", {}, `⚠️ Обнаружен локальный несохранённый черновик (от ${timeStr}). Восстановить?`),
+        el("div", { style: "display: flex; gap: 0.5rem;" },
+          el("button", {
+            class: "btn primary btn-sm",
+            type: "button",
+            onclick: () => {
+              currentRawMd = savedDraft.rawMd;
+              textarea.value = currentRawMd;
+              if (savedDraft.title) titleInput.value = savedDraft.title;
+              if (savedDraft.topic) topicInput.value = savedDraft.topic;
+              if (savedDraft.desc) descInput.value = savedDraft.desc;
+              if (savedDraft.icon) iconInput.value = savedDraft.icon;
+              updateLivePreview();
+              markDirty();
+              draftBanner.remove();
+            },
+          }, "Восстановить"),
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: () => {
+              localStorage.removeItem(draftKey);
+              draftBanner.remove();
+            },
+          }, "Отклонить")));
+    }
+  } catch {}
+
+  const deleteBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    style: "color: var(--bad); margin-left: auto;",
+    onclick: () => deleteNoteConfirm(noteId, container),
+  }, "🗑️ Удалить конспект");
+
+  const bottomActions = el("div", { class: "doc-editor-bottom-bar" },
+    saveBtn.cloneNode(true),
+    previewLink.cloneNode(true),
+    deleteBtn);
+  bottomActions.querySelector(".btn.primary").onclick = () => saveBtn.click();
+
+  // Лист документа (Sheet)
+  const docSheet = el("div", { class: "doc-paper-sheet" },
+    draftBanner || el("span", { style: "display: none;" }),
+    titleInput,
+    metaBox,
+    toolbar,
+    editorBodyContainer,
+    bottomActions);
+
+  container.replaceChildren(topbar, docSheet);
+}
+
+async function deleteNoteConfirm(noteId, container) {
+  if (confirm(`Безвозвратно удалить конспект «${noteId}»?`)) {
+    try {
+      await json(`/api/notes/${noteId}`, { method: "DELETE" });
+      try { localStorage.removeItem(`note_draft_${noteId}`); } catch {}
+      notesTab(container);
+    } catch (e) {
+      alert(`Ошибка удаления: ${e.message}`);
+    }
+  }
+}
+
+// ==========================================
+// 4. ВКЛАДКА: КОЛЛОКВИУМЫ
+// ==========================================
+
+async function colloquiumsTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем вопросы коллоквиумов…"));
+  let list = [];
+  try {
+    const res = await json("/api/colloquiums");
+    list = Array.isArray(res) ? res : (res.questions || []);
+  } catch {
+    try {
+      list = await json("colloquiums.json");
+    } catch (err) {
+      container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки вопросов: ${err.message}`));
+      return;
+    }
+  }
+
+  let activeCol = "all"; // "all" | "1" | "2"
+  let searchQuery = "";
+
+  const createBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: () => openColloquiumQuestionModal(null, () => colloquiumsTab(container)),
+  }, "➕ Добавить вопрос");
+
+  const previewBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    onclick: () => openPreviewModal("colloquiums/", "Коллоквиумы по дискретной математике"),
+  }, "👁️ Открыть раздел");
+
+  const head = el("div", { class: "test-manager-head" },
+    el("div", {},
+      el("h2", { style: "margin: 0;" }, "Управление коллоквиумами"),
+      el("p", { class: "muted", style: "margin: 0.2rem 0 0;" }, "Точные формулировки и определения для двух коллоквиумов курса дискретной математики")),
+    el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" }, previewBtn, createBtn));
+
+  // Панель фильтров: табы коллоквиумов + поиск
+  const filterBar = el("div", {
+    style: "display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1.25rem;",
+  });
+
+  const colTabs = el("div", { class: "topic-tabs" });
+  function renderColTabs() {
+    const counts = {
+      all: list.length,
+      1: list.filter((q) => Number(q.colloquium_id || q.colloquium) === 1).length,
+      2: list.filter((q) => Number(q.colloquium_id || q.colloquium) === 2).length,
+    };
+    colTabs.replaceChildren(
+      el("button", {
+        class: `topic-tab ${activeCol === "all" ? "active" : ""}`,
+        type: "button",
+        onclick: () => { activeCol = "all"; renderColTabs(); renderQuestions(); },
+      }, `Все вопросы (${counts.all})`),
+      el("button", {
+        class: `topic-tab ${activeCol === "1" ? "active" : ""}`,
+        type: "button",
+        onclick: () => { activeCol = "1"; renderColTabs(); renderQuestions(); },
+      }, `Коллоквиум 1 (${counts[1]})`),
+      el("button", {
+        class: `topic-tab ${activeCol === "2" ? "active" : ""}`,
+        type: "button",
+        onclick: () => { activeCol = "2"; renderColTabs(); renderQuestions(); },
+      }, `Коллоквиум 2 (${counts[2]})`)
+    );
+  }
+
+  const searchBox = el("input", {
+    type: "search",
+    placeholder: "🔍 Поиск по номеру, названию или формулам...",
+    style: "padding: 0.45rem 0.85rem; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 0.88rem; width: 22rem; max-width: 100%;",
+    oninput: (e) => {
+      searchQuery = e.target.value;
+      renderQuestions();
+    },
+  });
+
+  filterBar.append(colTabs, searchBox);
+
+  const listContainer = el("div", { style: "display: flex; flex-direction: column; gap: 0.75rem;" });
+
+  function renderQuestions() {
+    const qLower = searchQuery.trim().toLowerCase();
+    const filtered = list.filter((item) => {
+      const colId = String(item.colloquium_id || item.colloquium || 1);
+      if (activeCol !== "all" && colId !== activeCol) return false;
+      if (qLower) {
+        const matchTerm = (item.term || "").toLowerCase().includes(qLower);
+        const matchDef = (item.definition || "").toLowerCase().includes(qLower);
+        const matchNum = String(item.num) === qLower || `№${item.num}` === qLower || `вопрос ${item.num}` === qLower;
+        return matchTerm || matchDef || matchNum;
+      }
+      return true;
+    });
+
+    listContainer.replaceChildren();
+
+    if (!filtered.length) {
+      listContainer.append(el("p", { class: "muted", style: "padding: 2.5rem; text-align: center;" }, "Вопросов не найдено."));
+      return;
+    }
+
+    for (const q of filtered) {
+      const col = q.colloquium_id || q.colloquium || 1;
+      const card = el("div", {
+        class: "admin-col-card",
+        style: "background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.6rem; transition: border-color 0.15s ease;",
+      },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;" },
+          el("div", { style: "display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;" },
+            el("span", { class: "tag tag-accent", style: "font-weight: 700; font-size: 0.8rem;" }, `Коллоквиум ${col} · № ${q.num}`),
+            el("h3", { style: "margin: 0; font-size: 1.08rem; font-family: var(--display); font-weight: 700;" }, q.term),
+            q.hidden ? el("span", { class: "tag", style: "background: var(--bad-soft); color: var(--bad); font-weight: 700;" }, "Скрыт") : null),
+          el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+            el("button", {
+              class: "btn primary btn-sm",
+              type: "button",
+              onclick: () => openColloquiumQuestionModal(q, () => colloquiumsTab(container)),
+            }, "✏️ Изменить"),
+            el("button", {
+              class: `btn btn-sm btn-visibility-toggle ${q.hidden ? "is-hidden" : "is-visible"}`,
+              type: "button",
+              title: q.hidden ? "Вопрос скрыт от студентов. Нажмите, чтобы открыть." : "Вопрос виден студентам. Нажмите, чтобы скрыть.",
+              onclick: async () => {
+                try {
+                  await json(`/api/colloquiums/${encodeURIComponent(q.id)}`, {
+                    method: "PUT",
+                    body: { ...q, hidden: !q.hidden },
+                  });
+                  colloquiumsTab(container);
+                } catch (e) {
+                  alert(`Ошибка изменения видимости вопроса: ${e.message}`);
+                }
+              },
+            }, q.hidden ? "🙈 Скрыт" : "👁️ Виден"),
+            el("button", {
+              class: "btn quiet btn-sm btn-delete-action",
+              type: "button",
+              title: "Удалить вопрос",
+              onclick: () => deleteColloquiumQuestionConfirm(q.id, () => colloquiumsTab(container)),
+            }, "🗑️"))),
+        el("div", {
+          style: "font-size: 0.92rem; line-height: 1.55; color: var(--ink); background: var(--sunken); border-radius: var(--radius-sm); padding: 0.75rem 1rem; border: 1px solid var(--line-soft); max-height: 7rem; overflow-y: auto;",
+        }, q.definition),
+        q.examples ? el("div", {
+          style: "font-size: 0.85rem; color: var(--muted); line-height: 1.45; padding-left: 0.5rem; border-left: 2px solid var(--line);",
+        }, `Примеры: ${q.examples.slice(0, 180)}${q.examples.length > 180 ? "..." : ""}`) : null
+      );
+      listContainer.append(card);
+    }
+  }
+
+  renderColTabs();
+  renderQuestions();
+
+  container.replaceChildren(head, filterBar, listContainer);
+}
+
+function openColloquiumQuestionModal(existing = null, onSaved = null) {
+  const isEdit = Boolean(existing && existing.id);
+  const colVal = existing ? (existing.colloquium_id || existing.colloquium || 1) : 1;
+  const numVal = existing ? existing.num : 1;
+  const termVal = existing ? existing.term : "";
+  const defVal = existing ? existing.definition : "";
+  const exVal = existing ? (existing.examples || "") : "";
+  const hiddenVal = existing ? Boolean(existing.hidden) : false;
+
+  const hiddenCheckbox = el("input", {
+    type: "checkbox",
+    checked: hiddenVal,
+  });
+
+  const colSelect = el("select", { style: "padding: 0.4rem; border: 1px solid var(--line); border-radius: var(--radius-sm);" },
+    el("option", { value: "1", selected: String(colVal) === "1" }, "Коллоквиум 1"),
+    el("option", { value: "2", selected: String(colVal) === "2" }, "Коллоквиум 2")
+  );
+
+  const numInput = el("input", {
+    type: "number",
+    min: "1",
+    max: "100",
+    value: numVal,
+    style: "width: 5rem; padding: 0.4rem; border: 1px solid var(--line); border-radius: var(--radius-sm);",
+  });
+
+  const termInput = el("input", {
+    type: "text",
+    value: termVal,
+    placeholder: "Например: Определение Множества",
+    required: true,
+    style: "width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 0.95rem; font-weight: 600;",
+  });
+
+  const defTextarea = el("textarea", {
+    rows: "7",
+    placeholder: "Точное математическое определение из лекций (поддерживаются формулы $...$ и $$...$$)",
+    style: "width: 100%; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); font-family: inherit; font-size: 0.92rem; line-height: 1.5; resize: vertical;",
+  }, defVal);
+
+  const exTextarea = el("textarea", {
+    rows: "3",
+    placeholder: "Примеры, замечания или свойства (необязательно)",
+    style: "width: 100%; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); font-family: inherit; font-size: 0.92rem; line-height: 1.5; resize: vertical;",
+  }, exVal);
+
+  const previewBox = el("div", {
+    class: "admin-col-preview-box",
+    style: "background: var(--paper); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 0.75rem 1rem; margin-bottom: 0.85rem; font-size: 0.92rem; min-height: 2.5rem;",
+  });
+
+  function updateLivePreview() {
+    const raw = defTextarea.value.trim();
+    if (!raw) {
+      previewBox.innerHTML = "<span class=\"muted\">Здесь появится отрендеренное математическое определение с формулами...</span>";
+      return;
+    }
+    try {
+      let html = raw.replace(/\$\$([\s\S]*?)\$\$/g, (_, tex) => {
+        try {
+          return `<div style="text-align: center; margin: 0.5rem 0;">${katex.renderToString(tex, { displayMode: true, throwOnError: false })}</div>`;
+        } catch {
+          return tex;
+        }
+      });
+      html = html.replace(/(?<!\\)\$([^\n$]+?)(?<!\\)\$/g, (_, tex) => {
+        try {
+          return katex.renderToString(tex, { displayMode: false, throwOnError: false });
+        } catch {
+          return tex;
+        }
+      });
+      if (window.marked && typeof window.marked.parse === "function") {
+        previewBox.innerHTML = window.marked.parse(html);
+      } else {
+        previewBox.innerHTML = html.replace(/\n/g, "<br>");
+      }
+    } catch {
+      previewBox.textContent = raw;
+    }
+  }
+
+  defTextarea.addEventListener("input", updateLivePreview);
+  setTimeout(updateLivePreview, 10);
+
+  const errorBox = el("p", { class: "field-error", style: "margin: 0; color: var(--bad); font-size: 0.88rem;" });
+
+  const modal = el("dialog", {
+    style: "border: 0; border-radius: var(--radius-lg); padding: 1.5rem; max-width: 42rem; width: 92vw; background: var(--card); box-shadow: var(--shadow-lg); color: var(--ink);",
+  });
+
+  const form = el("form", {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      errorBox.textContent = "";
+      const term = termInput.value.trim();
+      const definition = defTextarea.value.trim();
+      const examples = exTextarea.value.trim();
+      const colloquium = Number(colSelect.value);
+      const num = Number(numInput.value) || 1;
+
+      if (!term || !definition) {
+        errorBox.textContent = "Заполните формулировку вопроса и определение.";
+        return;
+      }
+
+      const payload = {
+        colloquium,
+        colloquium_id: colloquium,
+        num,
+        term,
+        definition,
+        examples,
+        hidden: hiddenCheckbox.checked,
+      };
+
+      try {
+        if (isEdit) {
+          await json(`/api/colloquiums/${encodeURIComponent(existing.id)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          await json("/api/colloquiums", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        }
+        modal.close();
+        modal.remove();
+        if (onSaved) onSaved();
+      } catch (err) {
+        errorBox.textContent = `Ошибка сохранения: ${err.message}`;
+      }
+    },
+  },
+    el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;" },
+      el("h2", { style: "margin: 0; font-size: 1.25rem;" }, isEdit ? "Редактирование вопроса" : "Новый вопрос коллоквиума"),
+      el("button", {
+        type: "button",
+        class: "btn quiet btn-sm",
+        onclick: () => { modal.close(); modal.remove(); },
+      }, "✕")),
+    el("div", { style: "display: flex; gap: 1rem; align-items: center; margin-bottom: 0.85rem;" },
+      el("label", { style: "font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; gap: 0.4rem;" },
+        "Коллоквиум:", colSelect),
+      el("label", { style: "font-size: 0.85rem; font-weight: 500; display: flex; align-items: center; gap: 0.4rem;" },
+        "Номер вопроса:", numInput)),
+    el("div", { style: "margin-bottom: 0.85rem;" },
+      el("label", { style: "display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.3rem;" }, "Формулировка вопроса / название термина:"),
+      termInput),
+    el("div", { style: "margin-bottom: 0.85rem;" },
+      el("label", { style: "display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.3rem;" }, "Точное определение (Markdown + KaTeX):"),
+      defTextarea),
+    el("div", { style: "margin-bottom: 0.85rem;" },
+      el("label", { style: "display: block; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-bottom: 0.3rem;" }, "Предпросмотр формул и верстки:"),
+      previewBox),
+    el("div", { style: "margin-bottom: 0.85rem;" },
+      el("label", { style: "display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.3rem;" }, "Примеры и пояснения (необязательно):"),
+      exTextarea),
+    el("label", { style: "display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.85rem; cursor: pointer;" },
+      hiddenCheckbox,
+      el("span", { style: "font-size: 0.88rem; font-weight: 600;" }, "Скрыть вопрос (не показывать ученикам в справочнике и карточках)")),
+    errorBox,
+    el("div", { style: "display: flex; justify-content: flex-end; gap: 0.65rem; margin-top: 1rem;" },
+      el("button", {
+        type: "button",
+        class: "btn quiet",
+        onclick: () => { modal.close(); modal.remove(); },
+      }, "Отмена"),
+      el("button", {
+        type: "submit",
+        class: "btn primary",
+      }, isEdit ? "Сохранить изменения" : "Создать вопрос"))
+  );
+
+  modal.append(form);
+  document.body.append(modal);
+  modal.showModal();
+}
+
+async function deleteColloquiumQuestionConfirm(id, onDeleted = null) {
+  if (!confirm(`Вы действительно хотите удалить вопрос ${id}?`)) return;
+  try {
+    await json(`/api/colloquiums/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (onDeleted) onDeleted();
+  } catch (err) {
+    alert(`Ошибка удаления: ${err.message}`);
+  }
+}
+
+

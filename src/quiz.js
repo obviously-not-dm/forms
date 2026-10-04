@@ -54,8 +54,9 @@ function applyScope() {
   for (const sec of document.querySelectorAll(".block")) {
     sec.hidden = ![...sec.querySelectorAll(".q")].some((a) => set.has(a));
   }
-  for (const b of document.querySelectorAll("#map [data-go]")) b.hidden = !set.has(byId.get(b.dataset.go));
-  $("total").textContent = set.size;
+  for (const b of document.querySelectorAll("[data-go]")) b.hidden = !set.has(byId.get(b.dataset.go));
+  if ($("total")) $("total").textContent = set.size;
+  if ($("sidebar-total")) $("sidebar-total").textContent = set.size;
 }
 
 // ---------- ответы ----------
@@ -83,11 +84,19 @@ function answeredCount() {
 
 function updateProgress() {
   const done = answeredCount();
-  $("count").textContent = done;
-  $("progress-bar").style.width = `${(100 * done) / active().length}%`;
-  for (const b of document.querySelectorAll("#map [data-go]")) {
+  const total = active().length || 1;
+  if ($("count")) $("count").textContent = done;
+  if ($("progress-bar")) $("progress-bar").style.width = `${(100 * done) / total}%`;
+
+  if ($("sidebar-counter")) $("sidebar-counter").textContent = `${done} / ${total}`;
+  if ($("sidebar-progress-fill")) $("sidebar-progress-fill").style.width = `${(100 * done) / total}%`;
+  if ($("mobile-count")) $("mobile-count").textContent = done;
+  if ($("sheet-count")) $("sheet-count").textContent = done;
+
+  for (const b of document.querySelectorAll("[data-go]")) {
     const id = b.dataset.go;
     const a = byId.get(id);
+    if (!a) continue;
     b.classList.toggle("answered", isAnswered(a.dataset.type, state.answers[id]));
     b.classList.toggle("hinted", (state.hints[id] || 0) > 0);
     b.classList.toggle("flagged", Boolean(state.flags[id]));
@@ -116,12 +125,28 @@ function formatProblem(article) {
   return "";
 }
 
+function prev(article) {
+  const list = active();
+  const idx = list.indexOf(article);
+  if (idx > 0) {
+    const p = list[idx - 1];
+    p.scrollIntoView({ behavior: "smooth", block: "start" });
+    p.querySelector("input:not(:disabled)")?.focus({ preventScroll: true });
+  } else {
+    document.querySelector(".intro")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
 function next(article) {
   const list = active();
-  const n = list[list.indexOf(article) + 1];
-  if (!n) return;
-  n.scrollIntoView({ behavior: "smooth", block: "start" });
-  n.querySelector("input:not(:disabled)")?.focus({ preventScroll: true });
+  const idx = list.indexOf(article);
+  if (idx >= 0 && idx < list.length - 1) {
+    const n = list[idx + 1];
+    n.scrollIntoView({ behavior: "smooth", block: "start" });
+    n.querySelector("input:not(:disabled)")?.focus({ preventScroll: true });
+  } else {
+    document.getElementById("finish-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 for (const a of articles) {
@@ -132,6 +157,8 @@ for (const a of articles) {
     const warn = a.querySelector(".format-warn");
     if (warn && !warn.hidden && !formatProblem(a)) warn.hidden = true;
   });
+  a.querySelector(".q-prev-btn")?.addEventListener("click", () => prev(a));
+  a.querySelector(".q-next-btn")?.addEventListener("click", () => next(a));
   a.querySelector(".flag-btn").addEventListener("click", () => {
     if (state.flags[a.dataset.id]) delete state.flags[a.dataset.id];
     else state.flags[a.dataset.id] = true;
@@ -162,13 +189,34 @@ for (const a of articles) {
   }
 }
 
+// Предупреждение о сохранении при переходе назад
+document.querySelectorAll(".topbar-back, #quiz-back-link").forEach((link) => {
+  link.addEventListener("click", (e) => {
+    if (!state.finished && answeredCount() > 0) {
+      const ok = confirm("Ваши ответы надёжно сохранены в браузере, и вы сможете продолжить решение в любое время.\n\nПерейти к списку тестов?");
+      if (!ok) e.preventDefault();
+    }
+  });
+});
+
 // ---------- начало ----------
+
+const groupInput = $("group");
+if (groupInput) {
+  groupInput.value = localStorage.getItem("trainer:group") || "";
+  groupInput.addEventListener("input", () => {
+    localStorage.setItem("trainer:group", groupInput.value.trim().toUpperCase());
+  });
+}
 
 for (const r of document.querySelectorAll('input[name="mode"]')) r.checked = r.value === state.mode;
 
 $("start-btn").addEventListener("click", start);
 
 function start() {
+  if (groupInput && groupInput.value.trim()) {
+    localStorage.setItem("trainer:group", groupInput.value.trim().toUpperCase());
+  }
   state.mode = document.querySelector('input[name="mode"]:checked').value;
   state.startedAt = Date.now();
   persist();
@@ -192,8 +240,7 @@ function applyMode() {
   }
   body.classList.toggle("started", Boolean(state.startedAt));
   body.classList.toggle("mode-practice", state.mode === "practice");
-  body.classList.toggle("finished", state.finished);
-  $("submit").textContent = state.mode === "practice" ? "Завершить" : "Отправить";
+  updateSubmitButtons(state.mode === "practice" ? "Завершить" : "Отправить");
   if ($("feedback")) $("feedback").disabled = state.finished;
 }
 
@@ -307,8 +354,23 @@ for (const btn of document.querySelectorAll(".check-btn")) {
   btn.addEventListener("click", () => check(btn.closest(".q")).catch(showLoadError));
 }
 
+function updateSubmitButtons(text, disabled) {
+  const btns = [ $("submit"), $("side-submit"), $("mobile-submit") ];
+  for (const b of btns) {
+    if (b) {
+      if (text !== undefined) b.textContent = text;
+      if (disabled !== undefined) b.disabled = disabled;
+    }
+  }
+}
+
+function setNote(text) {
+  const n = $("action-note");
+  if (n) n.textContent = text;
+}
+
 function showLoadError() {
-  $("action-note").textContent = "Не удалось загрузить ответы. Проверьте интернет и попробуйте ещё раз.";
+  setNote("Не удалось загрузить ответы. Проверьте интернет и попробуйте ещё раз.");
 }
 
 // ---------- отправка ----------
@@ -317,8 +379,8 @@ function resetConfirm() {
   if (!confirming && !resuming) return;
   confirming = false;
   resuming = false;
-  $("action-note").textContent = "";
-  $("submit").textContent = state.mode === "practice" ? "Завершить" : "Отправить";
+  setNote("");
+  updateSubmitButtons(state.mode === "practice" ? "Завершить" : "Отправить");
   $("to-skipped")?.remove();
 }
 
@@ -327,42 +389,46 @@ function offerResume() {
   const skipped = firstSkipped();
   if (!state.startedAt || state.finished || !done || !skipped) return;
   resuming = true;
-  $("action-note").textContent = `Отвечено ${done} из ${active().length}.`;
+  setNote(`Отвечено ${done} из ${active().length}.`);
   const go = el("button", "btn quiet", `Продолжить с ${skipped.querySelector(".q-num").textContent}`);
   go.id = "to-skipped";
   go.type = "button";
   go.addEventListener("click", () => {
-    firstSkipped()?.scrollIntoView({ behavior: "smooth", block: "start" });
+    firstSkipped()?.scrollIntoView({ behavior: "smooth", block: "center" });
     resetConfirm();
   });
-  $("actions").prepend(go);
+  if ($("actions")) $("actions").prepend(go);
 }
 
 function firstSkipped() {
   return active().find((a) => !isAnswered(a.dataset.type, state.answers[a.dataset.id]));
 }
 
-$("submit").addEventListener("click", () => {
+function handleSubmit() {
+  ensureStarted();
   const left = active().length - answeredCount();
   if (left > 0 && !confirming) {
     resetConfirm();
     confirming = true;
-    $("action-note").textContent = `Без ответа: ${left} из ${active().length}.`;
-    $("submit").textContent = "Отправить так";
+    setNote(`Без ответа: ${left} из ${active().length}.`);
+    updateSubmitButtons("Отправить так?");
     const go = el("button", "btn quiet", "К пропущенному");
     go.id = "to-skipped";
     go.type = "button";
     go.addEventListener("click", () => {
-      firstSkipped()?.scrollIntoView({ behavior: "smooth", block: "start" });
+      goToUnanswered();
     });
-    $("actions").prepend(go);
+    if ($("actions")) $("actions").prepend(go);
+    goToUnanswered();
     return;
   }
   finish().catch(showLoadError);
-});
+}
+
+$("submit")?.addEventListener("click", handleSubmit);
 
 async function finish() {
-  $("submit").disabled = true;
+  updateSubmitButtons(undefined, true);
   const key = await loadKey();
   const questions = active().map((a) => key.get(a.dataset.id));
   state.result = grade(questions, state.answers);
@@ -376,7 +442,7 @@ async function finish() {
   updateProgress();
   remember();
   window.scrollTo({ top: 0, behavior: "smooth" });
-  $("submit").disabled = false;
+  updateSubmitButtons(undefined, false);
   await save();
 }
 
@@ -392,22 +458,53 @@ function remember() {
 
 async function save() {
   if (state.only) return; // в статистику идут только полные прохождения
-  const client = await db().catch(() => null);
-  if (!client) return;
-  const { error } = await client.from("attempts").insert({
+  const group = localStorage.getItem("trainer:group") || null;
+  const isPractice = Boolean(Object.keys(state.checked).length) || state.mode === "practice";
+
+  const attemptPayload = {
     quiz_id: testId,
-    group_name: null,
-    // если хоть одно задание проверяли по ходу, это тренировка, даже если в конце режим сменили
-    mode: Object.keys(state.checked).length ? "practice" : state.mode,
+    group_name: group,
+    mode: isPractice ? "practice" : "exam",
     answers: state.answers,
     hints: state.hints,
     score: state.result.score,
     max_score: state.result.max,
     feedback: state.feedback.trim() || null,
     duration_sec: Math.round((state.finishedAt - state.startedAt) / 1000),
-  });
+    created_at: new Date().toISOString(),
+  };
+
+  // 1. Сохраняем локально в localStorage для резервной копии
+  try {
+    const localKey = `trainer:local_attempts:${testId}`;
+    const localAttempts = JSON.parse(localStorage.getItem(localKey) || "[]");
+    localAttempts.push(attemptPayload);
+    localStorage.setItem(localKey, JSON.stringify(localAttempts.slice(-50)));
+  } catch {}
+
+  // 2. Отправляем на собственный бэкенд в SQLite Document Store
+  let serverSaved = false;
+  try {
+    const res = await fetch("/api/attempts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(attemptPayload),
+    });
+    if (res.ok) serverSaved = true;
+  } catch {}
+
+  // 3. Если дополнительно сконфигурирован Supabase — дублируем и туда
+  const client = await db().catch(() => null);
+  if (client) {
+    try {
+      await client.from("attempts").insert(attemptPayload);
+    } catch {}
+  }
+
   const status = document.querySelector(".save-status");
-  if (status && error) status.textContent = "Результат не попал в общую статистику, но разбор ниже доступен.";
+  if (status && !serverSaved && !client) {
+    status.textContent = "Результат сохранен в браузере.";
+  }
 }
 
 function showResult() {
@@ -499,18 +596,198 @@ function restart(only) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-// ---------- карта и картинки ----------
+// ---------- навигация по заданиям, карта и шторка ----------
 
-const mapDialog = $("map");
-$("map-open").addEventListener("click", () => mapDialog.showModal());
-mapDialog.addEventListener("click", (e) => {
-  if (e.target === mapDialog || e.target.closest("[data-close]")) mapDialog.close();
-  const go = e.target.closest("[data-go]");
-  if (go) {
-    mapDialog.close();
-    byId.get(go.dataset.go).scrollIntoView({ behavior: "smooth", block: "start" });
+const sheetMap = $("sheet-map") || $("map");
+
+function openMapSheet() {
+  sheetMap?.showModal();
+}
+
+$("map-open")?.addEventListener("click", openMapSheet);
+$("mobile-map-toggle")?.addEventListener("click", openMapSheet);
+
+sheetMap?.addEventListener("click", (e) => {
+  if (e.target === sheetMap || e.target.closest("[data-close]")) {
+    sheetMap.close();
   }
 });
+
+function ensureStarted() {
+  if (!state.startedAt) {
+    state.startedAt = Date.now();
+    body.classList.add("started");
+    persist();
+  }
+}
+
+// Автоматический старт при клике на любое задание или ответ
+document.querySelector(".questions")?.addEventListener("click", ensureStarted, { passive: true });
+document.querySelector(".questions")?.addEventListener("input", ensureStarted, { passive: true });
+
+// Подсветка активного задания в сайдбаре и карте с автоскроллом сетки
+let isManualNav = false;
+let manualNavTimer = null;
+
+function highlightCurrentQuestion(qId, scrollInMap = true) {
+  if (!qId) return;
+  let activeSidebarBtn = null;
+  document.querySelectorAll("[data-go]").forEach((btn) => {
+    const isCurrent = btn.dataset.go === qId;
+    btn.classList.toggle("current", isCurrent);
+    if (isCurrent && !activeSidebarBtn && btn.closest(".quiz-sidebar-map-grid")) {
+      activeSidebarBtn = btn;
+    }
+  });
+
+  const targetEl = byId.get(qId);
+  if (targetEl) {
+    const numEl = targetEl.querySelector(".q-num");
+    const label = numEl ? numEl.textContent.trim() : `№ ${qId}`;
+    const indicator = $("sidebar-current-q");
+    if (indicator) indicator.textContent = label.startsWith("№") ? `Задание ${label}` : label;
+
+    const curBlock = targetEl.closest(".block");
+    if (curBlock) {
+      const blocks = Array.from(document.querySelectorAll(".sheet .questions .block"));
+      const bIndex = blocks.indexOf(curBlock);
+      document.querySelectorAll("[data-goto-block]").forEach((b) => {
+        b.classList.toggle("active", Number(b.dataset.gotoBlock) === bIndex);
+      });
+    }
+  }
+
+  if (scrollInMap && activeSidebarBtn) {
+    activeSidebarBtn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }
+}
+
+// ScrollSpy для активного задания в боковой панели и карте
+const visibleQuestions = new Set();
+const spyObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (entry.isIntersecting) {
+      visibleQuestions.add(entry.target);
+    } else {
+      visibleQuestions.delete(entry.target);
+    }
+  }
+  if (isManualNav) return;
+  if (visibleQuestions.size === 0) return;
+
+  // Ищем задание, ближайшее к линии чтения (140px от верха экрана)
+  let bestEl = null;
+  let minDistance = Infinity;
+  for (const el of visibleQuestions) {
+    const rect = el.getBoundingClientRect();
+    const dist = Math.abs(rect.top - 140);
+    if (dist < minDistance) {
+      minDistance = dist;
+      bestEl = el;
+    }
+  }
+  if (bestEl?.dataset?.id) {
+    highlightCurrentQuestion(bestEl.dataset.id, true);
+  }
+}, { rootMargin: "0px 0px -40% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] });
+
+articles.forEach((a) => spyObserver.observe(a));
+
+// Клик по любому номеру задания в сайдбаре или мобильной карте
+document.addEventListener("click", (e) => {
+  const go = e.target.closest("[data-go]");
+  if (go) {
+    ensureStarted();
+    const targetId = go.dataset.go;
+    highlightCurrentQuestion(targetId, true);
+    isManualNav = true;
+    clearTimeout(manualNavTimer);
+    manualNavTimer = setTimeout(() => { isManualNav = false; }, 900);
+
+    const targetEl = byId.get(targetId);
+    if (targetEl) {
+      if (sheetMap && sheetMap.open) sheetMap.close();
+      targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetEl.style.transition = "outline 0.25s, box-shadow 0.25s";
+      targetEl.style.outline = "2px solid var(--accent)";
+      targetEl.style.boxShadow = "0 0 0 4px var(--accent-soft)";
+      setTimeout(() => {
+        targetEl.style.outline = "";
+        targetEl.style.boxShadow = "";
+      }, 1200);
+    }
+    return;
+  }
+
+  // Переход к разделу по клику в сайдбаре
+  const secBtn = e.target.closest("[data-goto-block]");
+  if (secBtn) {
+    ensureStarted();
+    const idx = Number(secBtn.dataset.gotoBlock);
+    const blocks = document.querySelectorAll(".sheet .questions .block");
+    if (blocks[idx]) {
+      blocks[idx].scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+});
+
+// Безопасный возврат к списку тестов
+function handleBackNav(e) {
+  if (state.startedAt && !state.finished && answeredCount() > 0) {
+    if (!confirm("Выйти из теста? Прогресс сохранён в браузере, вы сможете вернуться к нему позже.")) {
+      e.preventDefault();
+    }
+  }
+}
+$("quiz-back-link")?.addEventListener("click", handleBackNav);
+document.querySelector(".topbar-back")?.addEventListener("click", handleBackNav);
+
+// Переход к первому неотвеченному вопросу
+function goToUnanswered() {
+  ensureStarted();
+  const target = firstSkipped() || active()[0];
+  if (target) {
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.style.transition = "outline 0.25s, box-shadow 0.25s";
+    target.style.outline = "2px solid var(--accent)";
+    target.style.boxShadow = "0 0 0 4px var(--accent-soft)";
+    setTimeout(() => {
+      target.style.outline = "";
+      target.style.boxShadow = "";
+    }, 1200);
+  }
+}
+$("side-unanswered")?.addEventListener("click", goToUnanswered);
+$("mobile-unanswered")?.addEventListener("click", goToUnanswered);
+$("modal-unanswered")?.addEventListener("click", () => {
+  if (sheetMap && sheetMap.open) sheetMap.close();
+  goToUnanswered();
+});
+
+// Навигация по странице в сайдбаре
+$("side-to-top")?.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+$("modal-to-top")?.addEventListener("click", () => {
+  if (sheetMap && sheetMap.open) sheetMap.close();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+$("side-to-finish")?.addEventListener("click", () => {
+  $("finish-section")?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+$("modal-to-finish")?.addEventListener("click", () => {
+  if (sheetMap && sheetMap.open) sheetMap.close();
+  $("finish-section")?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// Скролл наверх
+$("side-top")?.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+$("side-submit")?.addEventListener("click", handleSubmit);
+$("mobile-submit")?.addEventListener("click", handleSubmit);
 
 const zoom = $("zoom");
 document.addEventListener("click", (e) => {

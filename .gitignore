@@ -3,3 +3,7 @@ dist/
 __pycache__/
 .DS_Store
 .history
+.npm-cache/
+.idea/
+data/*.sqlite*
+drive-download-*/

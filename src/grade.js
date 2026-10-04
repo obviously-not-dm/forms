@@ -4,14 +4,17 @@
 const LOOKALIKE = { а: "a", с: "c", е: "e", о: "o", р: "p", х: "x", у: "y" };
 
 export function normalize(s) {
-  return String(s ?? "")
+  let str = String(s ?? "")
     .normalize("NFC")
     .toLowerCase()
     .replace(/ё/g, "е")
     .replace(/[асеорху]/g, (ch) => LOOKALIKE[ch])
+    .replace(/\\?(?:emptyset|varnothing|empty)/g, "{}")
     .replace(/∅/g, "{}")
     .replace(/[−–—]/g, "-")
     .replace(/\s+/g, "");
+  if (str !== ".") str = str.replace(/\.+$/, "");
+  return str;
 }
 
 // Множество сравнивается без учёта порядка и повторов, в том числе вложенное:
@@ -22,7 +25,7 @@ function canonical(t) {
   if (open !== "{" && open !== "(") return /[{}(),;]/.test(t) ? null : t;
   const close = open === "{" ? "}" : ")";
   if (t.at(-1) !== close) return null;
-  const inner = t.slice(1, -1);
+  let inner = t.slice(1, -1).replace(/[,;]+$/, "");
   const parts = [];
   let depth = 0;
   let start = 0;
@@ -50,8 +53,9 @@ export function parseSet(s) {
 }
 
 export function parseNumber(s) {
-  const t = String(s ?? "").trim().replace(/[−–—]/, "-").replace(",", ".");
-  return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
+  const t = String(s ?? "").trim().replace(/[−–—]/g, "-").replace(",", ".").replace(/\s+/g, "");
+  const clean = t !== "." ? t.replace(/\.+$/, "") : t;
+  return /^[+-]?\d+(\.\d+)?$/.test(clean) ? Number(clean) : null;
 }
 
 export function guessCompare(answers) {

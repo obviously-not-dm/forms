@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "dev": "node build.mjs --serve"
+    "dev": "node build.mjs --serve",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@fontsource/onest": "^5.3.1",

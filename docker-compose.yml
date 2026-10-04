@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    container_name: dm-trainers
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      - ADMIN_USER=admin@itmo.ru
+      - ADMIN_PASSWORD=admin
+    volumes:
+      - ./data:/app/data
+      - ./content:/app/content
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

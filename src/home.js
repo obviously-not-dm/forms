@@ -15,3 +15,45 @@ for (const a of document.querySelectorAll(".tests a")) {
     }
   } catch {}
 }
+
+// Переключение основных вкладок на главной (Тесты / Конспекты)
+const tabButtons = document.querySelectorAll(".home-tab-btn");
+const tabPanels = document.querySelectorAll(".home-tab-panel");
+
+function switchHomeTab(tabName) {
+  tabButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tabName);
+  });
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.panel === tabName);
+  });
+  try {
+    localStorage.setItem("trainer:home_tab", tabName);
+  } catch {}
+}
+
+tabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => switchHomeTab(btn.dataset.tab));
+});
+
+try {
+  const savedTab = localStorage.getItem("trainer:home_tab");
+  if (savedTab && document.querySelector(`.home-tab-btn[data-tab="${savedTab}"]`)) {
+    switchHomeTab(savedTab);
+  }
+} catch {}
+
+// Фильтрация тестов по темам/папкам
+const topicFilterBtns = document.querySelectorAll(".topic-filter-btn");
+const testItems = document.querySelectorAll(".tests li");
+
+topicFilterBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const topic = btn.dataset.topic;
+    topicFilterBtns.forEach((b) => b.classList.toggle("active", b === btn));
+    testItems.forEach((li) => {
+      const liTopic = li.dataset.topic || "";
+      li.style.display = (!topic || topic === "all" || liTopic === topic) ? "" : "none";
+    });
+  });
+});
