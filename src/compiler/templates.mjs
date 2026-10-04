@@ -180,11 +180,22 @@ export function quizPage(test, site = {}) {
 
   return `${head(meta.title || test.id, "../", "", test.math)}
 <body class="quiz platform-body" data-id="${esc(test.id)}" data-count="${count}" data-group-pattern="${esc(site.groupPattern || "")}">
+<script>
+  (function(){
+    try {
+      var tid = document.body.dataset.id || location.pathname.replace(/^\\/|\\/$/g, '').split('/').pop();
+      var s = JSON.parse(localStorage.getItem('trainer:' + tid) || sessionStorage.getItem('trainer:' + tid) || 'null');
+      if (s && (s.startedAt || (s.answers && Object.keys(s.answers).length > 0))) {
+        document.body.classList.add('started');
+      }
+    } catch(e){}
+  })();
+</script>
 ${navbarHtml("../", "tests", site)}
 <header class="quiz-subtopbar">
   <div class="quiz-subtopbar-inner">
     <div class="quiz-subtopbar-left">
-      <a class="topbar-back" href="../" aria-label="Все тренажёры">← Все тренажёры</a>
+      <a class="topbar-back" href="../tests/" aria-label="Все тренажёры">← Все тренажёры</a>
       <span class="topbar-title">${esc(meta.title || test.id)}</span>
     </div>
     <div class="quiz-subtopbar-right">
@@ -230,7 +241,7 @@ ${navbarHtml("../", "tests", site)}
     </fieldset>
     <div class="pretest-action-wrap" style="margin-top: 1.5rem;">
       <button class="btn primary btn-lg" id="start-btn" type="button" style="width: 100%; padding: 0.85rem; font-size: 1.05rem; font-weight: 700;">
-        🚀 Начать тестирование (${count} ${tasksWord(count)})
+        🚀 Начать тестирование (${tasksWord(count)})
       </button>
     </div>
   </section>
@@ -340,7 +351,8 @@ ${authModalHtml(site)}
 }
 
 export function notesPage(notes = [], site = {}) {
-  const clientData = JSON.stringify(notes.map((n) => ({
+  const visible = (notes || []).filter((n) => !n.meta?.hidden);
+  const clientData = JSON.stringify(visible.map((n) => ({
     id: n.id,
     meta: n.meta,
     html: n.html,
@@ -588,31 +600,9 @@ export function colloquiumsPage(colloquiums = [], site = {}) {
 }
 
 export function indexPage(tests = [], notes = [], site = {}, colloquiumsCount = 106) {
-  const md = new Marked({ breaks: true });
   const visible = tests.filter((t) => !t.meta?.hidden);
   const visibleNotes = (notes || []).filter((n) => !n.meta?.hidden);
-  const testTopics = Array.from(new Set(visible.map((t) => t.meta?.topic).filter(Boolean)));
-
-  const testItems = visible.map((t, i) => `
-  <li data-num="${String(visible.length - i).padStart(2, "0")}" data-topic="${esc(t.meta?.topic || "")}"><a href="${esc(t.id)}/" data-id="${esc(t.id)}" data-count="${t.count}">
-    <span class="t-title">${esc(t.meta?.title || t.id)}</span>
-    <span class="t-meta">${tasksWord(t.count)}</span>
-    <span class="t-status"></span>
-  </a></li>`).join("");
-
-  const notesCards = visibleNotes.map((n) => `
-    <a href="notes/?id=${esc(n.id)}" class="note-card">
-      <div class="note-card-icon">${esc(n.meta?.icon || "📄")}</div>
-      <div class="note-card-content">
-        <div class="note-card-topic">${esc(n.meta?.topic || "Общее")}</div>
-        <h3 class="note-card-title">${esc(n.meta?.title || n.id)}</h3>
-        <p class="note-card-desc">${esc(n.meta?.description || "")}</p>
-        <div class="note-card-footer">
-          <span class="note-card-action">Читать конспект →</span>
-        </div>
-      </div>
-    </a>
-  `).join("");
+  const totalTasks = tests.reduce((sum, t) => sum + (t.count || 0), 0);
 
   return `${head(site.title || "Дискретная математика — Образовательная платформа", "")}
 <body class="home platform-body">
@@ -624,50 +614,16 @@ ${navbarHtml("", "home", site)}
     <div class="hero-badge">🎓 Университетский курс · Факультет ИТ</div>
     <h1 class="hero-title">${esc(site.title || "Дискретная математика")}</h1>
     <p class="hero-desc">
-      Интерактивная образовательная платформа курса: онлайн-тренажёры, контрольные летучки на занятиях, конспекты лекций с формулами и подготовка к коллоквиумам.
+      Интерактивная образовательная платформа: онлайн-тренажёры для самопроверки, синхронные летучки на занятиях, конспекты лекций с формулами KaTeX и подготовка к коллоквиумам.
     </p>
     <div class="hero-actions">
-      <a href="tests/" class="btn primary">📋 К тренажёрам</a>
+      <a href="tests/" class="btn primary">📋 Перейти к тренажёрам</a>
       <a href="contests/" class="btn quiet">⏱️ Летучки на парах</a>
-      <a href="leaderboard/" class="btn quiet">🏆 Рейтинг курса</a>
+      <a href="notes/" class="btn quiet">📚 Конспекты</a>
+      <a href="colloquiums/" class="btn quiet">🎓 Коллоквиумы</a>
+      <a href="leaderboard/" class="btn quiet">🏆 Рейтинг</a>
     </div>
   </section>
-
-  <!-- Quick Access Portal Grid (4 Key Course Sections) -->
-  <div class="portal-modules-grid">
-    <a href="tests/" class="portal-module-card">
-      <div class="portal-module-icon">📋</div>
-      <div class="portal-module-body">
-        <div class="portal-module-title">Тренажёры и генератор</div>
-        <div class="portal-module-sub">${visible.length} тестов · Случайные варианты · Избранное</div>
-      </div>
-      <div class="portal-module-arrow">→</div>
-    </a>
-    <a href="contests/" class="portal-module-card highlight">
-      <div class="portal-module-icon">⏱️</div>
-      <div class="portal-module-body">
-        <div class="portal-module-title">Онлайн-контесты</div>
-        <div class="portal-module-sub">Экспресс-летучки на парах с таймером</div>
-      </div>
-      <div class="portal-module-arrow">→</div>
-    </a>
-    <a href="notes/" class="portal-module-card">
-      <div class="portal-module-icon">📚</div>
-      <div class="portal-module-body">
-        <div class="portal-module-title">Конспекты и лекции</div>
-        <div class="portal-module-sub">${visibleNotes.length} тем · Формулы KaTeX и поиск</div>
-      </div>
-      <div class="portal-module-arrow">→</div>
-    </a>
-    <a href="colloquiums/" class="portal-module-card">
-      <div class="portal-module-icon">🎓</div>
-      <div class="portal-module-body">
-        <div class="portal-module-title">Коллоквиумы</div>
-        <div class="portal-module-sub">${colloquiumsCount} определений · Карточки Quizlet</div>
-      </div>
-      <div class="portal-module-arrow">→</div>
-    </a>
-  </div>
 
   <!-- Dynamic Active Contest Alert Banner (populated by JS) -->
   <div id="home-active-contest-banner" class="home-contest-banner" hidden></div>
@@ -675,142 +631,109 @@ ${navbarHtml("", "home", site)}
   <!-- Student Snapshot Card (if logged in, populated by JS) -->
   <div id="home-student-card" hidden></div>
 
-  <!-- Course Onboarding Guide (Что делать, зачем и куда) -->
-  <section class="portal-guide-section" style="margin-bottom: 2rem;">
-    <div class="section-title-wrap" style="margin-bottom: 1rem;">
-      <h2 class="section-title">🧭 Как устроен курс и как по нему заниматься</h2>
-      <p class="section-subtitle" style="color: var(--muted); font-size: 0.95rem; margin-top: 0.25rem;">
-        Пошаговое руководство для успешной сдачи рубежных контролей, летучек и экзамена.
+  <!-- Key Capabilities / Возможности платформы (clean feature cards) -->
+  <section class="portal-features-section" style="margin-bottom: 2rem;">
+    <div class="section-title-wrap" style="margin-bottom: 1.25rem;">
+      <h2 class="section-title" style="margin: 0 0 0.35rem; font-size: 1.45rem;">✨ Ключевые возможности платформы</h2>
+      <p class="section-subtitle" style="color: var(--muted); font-size: 0.95rem; margin: 0;">
+        Все учебные инструменты распределены по отдельным вкладкам в верхнем меню. Выберите нужный раздел для подготовки:
       </p>
     </div>
-    <div class="guide-steps-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
-      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
-        <div class="guide-step-badge" style="font-weight: 700; color: var(--accent); margin-bottom: 0.4rem;">Шаг 1 · Теория</div>
-        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Конспекты и лекции</h3>
-        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Изучайте определения, свойства и доказательства с формулами KaTeX и удобным поиском.</p>
-        <a href="notes/" class="btn quiet btn-sm">Открыть конспекты →</a>
-      </div>
-      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
-        <div class="guide-step-badge" style="font-weight: 700; color: var(--accent); margin-bottom: 0.4rem;">Шаг 2 · Тренировка</div>
-        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Тренажёры и генератор</h3>
-        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Решайте задания по темам, добавляйте задачи в избранное или создавайте случайные блиц-варианты.</p>
-        <a href="tests/" class="btn quiet btn-sm">Перейти к тестам →</a>
-      </div>
-      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
-        <div class="guide-step-badge" style="font-weight: 700; color: #ef4444; margin-bottom: 0.4rem;">Шаг 3 · Летучки на парах</div>
-        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Онлайн-контесты</h3>
-        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Быстрые работы на занятиях со встроенным таймером и автоматическим подсчётом баллов в рейтинг.</p>
-        <a href="contests/" class="btn quiet btn-sm">Участвовать в контестах →</a>
-      </div>
-      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
-        <div class="guide-step-badge" style="font-weight: 700; color: var(--ok); margin-bottom: 0.4rem;">Шаг 4 · Опросы</div>
-        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Коллоквиумы (106 вопр.)</h3>
-        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Сборник определений Пермякова и Страдиной и интерактивный режим карточек Quizlet.</p>
-        <a href="colloquiums/" class="btn quiet btn-sm">Учить определения →</a>
-      </div>
+
+    <div class="portal-capabilities-grid">
+      <!-- 1. Тренажёры -->
+      <article class="portal-capability-card">
+        <div class="portal-capability-top">
+          <span class="portal-capability-icon">📋</span>
+          <span class="portal-capability-tag">Практика</span>
+        </div>
+        <h3 class="portal-capability-title">Онлайн-тренажёры и генератор тестов</h3>
+        <div class="portal-capability-sub">${visible.length} тестов по темам · ${totalTasks} заданий</div>
+        <p class="portal-capability-desc">
+          Проверочные работы по всем разделам курса (множества, отношения, соответствия, графы, булева логика). Поддержка режимов экзамена и тренировки с подсказками, генератор случайных вариантов и сохранение ответов при перезагрузке страницы.
+        </p>
+        <div class="portal-capability-footer">
+          <a href="tests/" class="btn primary btn-sm">Открыть тренажёры →</a>
+        </div>
+      </article>
+
+      <!-- 2. Онлайн-контесты -->
+      <article class="portal-capability-card">
+        <div class="portal-capability-top">
+          <span class="portal-capability-icon">⏱️</span>
+          <span class="portal-capability-tag">На занятиях</span>
+        </div>
+        <h3 class="portal-capability-title">Онлайн-контесты и экспресс-летучки</h3>
+        <div class="portal-capability-sub">Синхронный таймер · Мгновенные баллы</div>
+        <p class="portal-capability-desc">
+          Контрольные проверочные работы прямо во время аудиторных пар. Преподаватель активирует контест с ограничением времени, ответы проверяются автоматически, а набранные баллы сразу идут в единый рейтинг курса.
+        </p>
+        <div class="portal-capability-footer">
+          <a href="contests/" class="btn quiet btn-sm">Перейти к контестам →</a>
+        </div>
+      </article>
+
+      <!-- 3. Конспекты -->
+      <article class="portal-capability-card">
+        <div class="portal-capability-top">
+          <span class="portal-capability-icon">📚</span>
+          <span class="portal-capability-tag">Теория</span>
+        </div>
+        <h3 class="portal-capability-title">Конспекты и лекции с формулами</h3>
+        <div class="portal-capability-sub">${visibleNotes.length} тем лекций · Формулы KaTeX · Поиск</div>
+        <p class="portal-capability-desc">
+          Полный теоретический лекционный материал курса. Строгие математические определения, формулировки теорем с доказательствами, типовые примеры и мгновенная фильтрация и поиск по формулам и терминам.
+        </p>
+        <div class="portal-capability-footer">
+          <a href="notes/" class="btn quiet btn-sm">Читать конспекты →</a>
+        </div>
+      </article>
+
+      <!-- 4. Коллоквиумы -->
+      <article class="portal-capability-card">
+        <div class="portal-capability-top">
+          <span class="portal-capability-icon">🎓</span>
+          <span class="portal-capability-tag">Подготовка к опросам</span>
+        </div>
+        <h3 class="portal-capability-title">Коллоквиумы и термины (Quizlet)</h3>
+        <div class="portal-capability-sub">${colloquiumsCount} определений · Карточки Quizlet 3D</div>
+        <p class="portal-capability-desc">
+          Единый банк всех 106 строгих математических определений из лекций Пермякова и Страдиной (Коллоквиум 1 и Коллоквиум 2). Интерактивные флип-карточки для запоминания и структурированный словарь терминов.
+        </p>
+        <div class="portal-capability-footer">
+          <a href="colloquiums/" class="btn quiet btn-sm">Учить определения →</a>
+        </div>
+      </article>
     </div>
   </section>
 
-  <!-- Two-Column Portal Layout -->
-  <div class="portal-layout">
-    <div class="portal-main-col">
-      <div class="home-tabs-bar" role="tablist">
-        <button class="home-tab-btn active" data-tab="tests" role="tab" type="button">
-          📋 Тренажёры <span class="home-tab-count">${visible.length}</span>
-        </button>
-        <button class="home-tab-btn" data-tab="notes" role="tab" type="button">
-          📚 Конспекты и теория <span class="home-tab-count">${visibleNotes.length}</span>
-        </button>
-        <button class="home-tab-btn" data-tab="colloquiums" role="tab" type="button">
-          🎓 Коллоквиумы <span class="home-tab-count">${colloquiumsCount}</span>
-        </button>
+  <!-- Bottom Section: Top-5 Leaderboard and Course Tips -->
+  <div class="portal-bottom-grid">
+    <div class="portal-sidebar-box" style="margin-bottom: 0;">
+      <div class="sidebar-box-header">
+        <h3>🏆 Лидеры курса (Топ-5)</h3>
+        <a href="leaderboard/" class="sidebar-more-link">Весь рейтинг →</a>
       </div>
-
-      <div class="home-tab-panel active" data-panel="tests" id="tests">
-        <div class="home-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
-          <span style="font-weight: 600; color: var(--muted); font-size: 0.9rem;">📋 Каталог тестов и генератор заданий</span>
-          <a href="tests/" class="btn primary btn-sm">Открыть раздел тренажёров и генератор →</a>
-        </div>
-        ${testTopics.length > 1 ? `
-        <div class="topic-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
-          <button class="btn quiet btn-sm topic-filter-btn active" data-topic="all" type="button">Все темы</button>
-          ${testTopics.map((tp) => `<button class="btn quiet btn-sm topic-filter-btn" data-topic="${esc(tp)}" type="button">${esc(tp)}</button>`).join("")}
-        </div>` : ""}
-        <ol class="tests">${testItems}
-        </ol>
-      </div>
-
-      <div class="home-tab-panel" data-panel="notes">
-        <div class="home-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
-          <span style="font-weight: 600; color: var(--muted); font-size: 0.9rem;">📚 Теория и лекции по темам курса</span>
-          <a href="notes/" class="btn quiet btn-sm">Открыть полный раздел конспектов →</a>
-        </div>
-        <div class="notes-grid">
-          ${notesCards || '<p class="muted">Конспекты пока не добавлены.</p>'}
-        </div>
-      </div>
-
-      <div class="home-tab-panel" data-panel="colloquiums">
-        <div class="home-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
-          <span style="font-weight: 600; color: var(--muted); font-size: 0.9rem;">🎓 Определения и формулы к коллоквиумам</span>
-          <a href="colloquiums/" class="btn quiet btn-sm">Открыть справочник определений →</a>
-        </div>
-        <div class="colloquiums-home-grid">
-          <div class="colloquium-promo-card">
-            <div class="colloquium-promo-icon">🎓</div>
-            <div class="colloquium-promo-body">
-              <h3>Коллоквиум 1: Множества, отношения, соответствия</h3>
-              <p>53 строгих определения из лекций Пермякова и Страдиной: множества, булеан, прямое произведение, бинарные отношения, все свойства, замыкания, фактор-множества, отношения порядка, решётки, отображения, мощности.</p>
-              <div class="colloquium-promo-footer">
-                <a href="colloquiums/?col=1&mode=dict" class="btn primary btn-sm">📖 Читать все определения (53) →</a>
-                <a href="colloquiums/?col=1&mode=cards" class="btn quiet btn-sm">🗂️ Карточки (Quizlet)</a>
-              </div>
-            </div>
-          </div>
-          <div class="colloquium-promo-card">
-            <div class="colloquium-promo-icon">⚡</div>
-            <div class="colloquium-promo-body">
-              <h3>Коллоквиум 2: Булева алгебра и теория кодирования</h3>
-              <p>53 строгих определения и формулы: высказывания, булевы функции, нормальные формы СДНФ/СКНФ, минимизация, полиномы Жегалкина, критерий Поста, энтропия Шеннона, коды Хаффмана и Хэмминга.</p>
-              <div class="colloquium-promo-footer">
-                <a href="colloquiums/?col=2&mode=dict" class="btn primary btn-sm">📖 Читать все определения (53) →</a>
-                <a href="colloquiums/?col=2&mode=cards" class="btn quiet btn-sm">🗂️ Карточки (Quizlet)</a>
-              </div>
-            </div>
-          </div>
-          <div class="colloquium-promo-card full-width">
-            <div class="colloquium-promo-icon">📖</div>
-            <div class="colloquium-promo-body">
-              <h3>Единый сборник всех определений курса (106 вопросов)</h3>
-              <p>Полный справочник всех определений с формулами KaTeX из лекций обоих преподавателей, мгновенным полнотекстовым поиском по формулам и терминам, и режимом интервального повторения Quizlet.</p>
-              <div class="colloquium-promo-footer">
-                <a href="colloquiums/?col=all&mode=dict" class="btn primary btn-sm">📖 Открыть полный сборник (106 определений) →</a>
-                <a href="colloquiums/?col=all&mode=cards" class="btn quiet btn-sm">🗂️ Все карточки (106)</a>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div id="home-top5-leaderboard">
+        <p class="muted">Загружаем лидеров…</p>
       </div>
     </div>
 
-    <!-- Portal Sidebar: Top-5 Leaders & Fast Links -->
-    <aside class="portal-sidebar-col">
-      <div class="portal-sidebar-box">
-        <div class="sidebar-box-header">
-          <h3>🏆 Топ-5 студентов курса</h3>
-          <a href="leaderboard/" class="sidebar-more-link">Весь рейтинг →</a>
-        </div>
-        <div id="home-top5-leaderboard">
-          <p class="muted">Загружаем лидеров…</p>
-        </div>
+    <div class="portal-sidebar-box feature-box" style="margin-bottom: 0;">
+      <h3>🧭 Советы по подготовке к сдаче</h3>
+      <p style="margin: 0 0 0.75rem; font-size: 0.88rem; color: var(--muted); line-height: 1.5;">
+        Чтобы успешно закрыть дисциплину на максимальный балл:
+      </p>
+      <ul style="margin: 0 0 1rem 1.25rem; padding: 0; font-size: 0.86rem; line-height: 1.6; color: var(--ink);">
+        <li><b>Регулярно решайте тренажёры</b> перед контрольными точками и экзаменом.</li>
+        <li><b>Повторяйте термины</b> в режиме карточек Quizlet перед коллоквиумами.</li>
+        <li><b>Отрабатывайте ошибки</b>: смотрите «Слабые места» в личном профиле.</li>
+      </ul>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        <a href="tests/" class="btn quiet btn-sm">Выбрать тест</a>
+        <a href="leaderboard/" class="btn quiet btn-sm">Открыть рейтинг</a>
       </div>
-
-      <div class="portal-sidebar-box feature-box">
-        <h3>⏱️ Летучки на парах</h3>
-        <p>Преподаватель запускает 10-15 минутный онлайн-контест во время занятия. Таймер синхронизирован, результат сразу в турнирной таблице.</p>
-        <a href="contests/" class="btn quiet btn-sm btn-block">Перейти к контестам →</a>
-      </div>
-    </aside>
+    </div>
   </div>
 </main>
 

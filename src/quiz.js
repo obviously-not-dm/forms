@@ -13,6 +13,14 @@ let keyPromise = null;
 let confirming = false; // первое нажатие «Отправить» при пустых ответах
 let resuming = false;   // подсказка «Продолжить с …» после возвращения к тесту
 
+// Мгновенное применение класса .started при инициализации
+if (state.startedAt || Object.keys(state.answers || {}).length > 0) {
+  if (!state.startedAt) state.startedAt = Date.now();
+  body.classList.add("started");
+  const startEl = $("start");
+  if (startEl) startEl.style.display = "none";
+}
+
 // ---------- состояние ----------
 
 function fresh(mode = "exam") {
@@ -30,9 +38,9 @@ function restore() {
     if (!s) {
       try { s = JSON.parse(sessionStorage.getItem(storeKey)); } catch {}
     }
-    if (s && s.answers) {
+    if (s && (s.answers || s.startedAt)) {
       const stateObj = { ...fresh(), ...s };
-      if (Object.keys(stateObj.answers).length > 0 && !stateObj.startedAt) {
+      if (!stateObj.startedAt && Object.keys(stateObj.answers || {}).length > 0) {
         stateObj.startedAt = Date.now();
       }
       return stateObj;
@@ -303,7 +311,7 @@ if (groupInput) {
 
 for (const r of document.querySelectorAll('input[name="mode"]')) r.checked = r.value === state.mode;
 
-$("start-btn").addEventListener("click", start);
+$("start-btn")?.addEventListener("click", start);
 
 function start() {
   if (groupInput && groupInput.value.trim()) {
@@ -947,14 +955,19 @@ $("side-submit")?.addEventListener("click", handleSubmit);
 $("mobile-submit")?.addEventListener("click", handleSubmit);
 
 const zoom = $("zoom");
-document.addEventListener("click", (e) => {
-  const img = e.target.closest(".q-text img, .explanation img, .hint img");
-  if (!img) return;
-  zoom.querySelector("img").src = img.currentSrc || img.src;
-  zoom.querySelector("img").alt = img.alt;
-  zoom.showModal();
-});
-zoom.addEventListener("click", () => zoom.close());
+if (zoom) {
+  document.addEventListener("click", (e) => {
+    const img = e.target.closest(".q-text img, .explanation img, .hint img");
+    if (!img) return;
+    const targetImg = zoom.querySelector("img");
+    if (targetImg) {
+      targetImg.src = img.currentSrc || img.src;
+      targetImg.alt = img.alt;
+    }
+    zoom.showModal?.();
+  });
+  zoom.addEventListener("click", () => zoom.close?.());
+}
 
 const feedback = $("feedback");
 if (feedback) {
@@ -964,8 +977,10 @@ if (feedback) {
 
 // ---------- восстановление ----------
 
-if (state.startedAt) {
+if (state.startedAt || Object.keys(state.answers || {}).length > 0) {
   body.classList.add("started");
+  const startEl = $("start");
+  if (startEl) startEl.style.display = "none";
 }
 
 for (const a of articles) {

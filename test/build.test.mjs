@@ -116,11 +116,13 @@ test("notes build produces dist/notes/index.html, dist/notes.json and tabs on in
   const notesJson = JSON.parse(fs.readFileSync(path.join(ROOT, "dist", "notes.json"), "utf8"));
   assert.ok(Array.isArray(notesJson) && notesJson.length >= 5, "notes.json should contain at least 5 notes");
 
+  const notesHtml = fs.readFileSync(path.join(ROOT, "dist", "notes", "index.html"), "utf8");
+  assert.ok(notesHtml.includes('class="notes-layout"'), "dist/notes/index.html should contain notes-layout");
+
   const indexHtml = fs.readFileSync(path.join(ROOT, "dist", "index.html"), "utf8");
-  assert.ok(indexHtml.includes('class="home-tabs-bar"'), "index.html should contain home-tabs-bar");
-  assert.ok(indexHtml.includes('data-tab="tests"'), "index.html should contain tests tab");
-  assert.ok(indexHtml.includes('data-tab="notes"'), "index.html should contain notes tab");
-  assert.ok(indexHtml.includes('class="notes-grid"'), "index.html should contain notes-grid");
+  assert.ok(indexHtml.includes('href="notes/"'), "index.html should link to notes");
+  assert.ok(indexHtml.includes('href="tests/"'), "index.html should link to tests");
+  assert.ok(!indexHtml.includes('class="home-tabs-bar"'), "index.html should be clean without duplicate home-tabs-bar");
 });
 
 test("SQLite attempts repository correctly saves, filters, and clears attempts", async () => {
@@ -251,9 +253,8 @@ test("colloquiums build produces dist/colloquiums/index.html, dist/colloquiums.j
   assert.ok(colHtml.includes("dict-items-list"), "Colloquiums page must include dictionary accordion");
 
   const indexHtml = fs.readFileSync(indexHtmlPath, "utf8");
-  assert.ok(indexHtml.includes('data-tab="colloquiums"'), "Home page must include 3rd tab for colloquiums");
-  assert.ok(indexHtml.includes("Коллоквиум 1: Множества, отношения, соответствия"), "Home page must include Col 1 promo");
-  assert.ok(indexHtml.includes("Коллоквиум 2: Булева алгебра и теория кодирования"), "Home page must include Col 2 promo");
+  assert.ok(indexHtml.includes('href="colloquiums/"'), "Home page must link to colloquiums");
+  assert.ok(indexHtml.includes("Коллоквиумы"), "Home page must feature colloquiums capability");
 });
 
 test("Server REST API handles /api/colloquiums CRUD", async () => {
@@ -640,9 +641,11 @@ test("hiding and unhiding tests, notes, and colloquiums works end-to-end", async
   const foundCol = colJson.find((c) => c.id === tempColId);
   assert.ok(foundCol && foundCol.hidden === true, "Colloquium question should be marked hidden in colloquiums.json");
 
-  const indexHtml = fs.readFileSync(path.join(ROOT, "dist", "index.html"), "utf8");
-  assert.ok(!indexHtml.includes(`href="${tempTestId}/"`), "Hidden test must NOT appear on student home page");
-  assert.ok(!indexHtml.includes(`notes/?id=${tempNoteId}`), "Hidden note must NOT appear on student home page");
+  const testsCatalogHtml = fs.readFileSync(path.join(ROOT, "dist", "tests", "index.html"), "utf8");
+  assert.ok(!testsCatalogHtml.includes(`../${tempTestId}/`), "Hidden test must NOT appear in tests catalog");
+
+  const notesCatalogHtml = fs.readFileSync(path.join(ROOT, "dist", "notes", "index.html"), "utf8");
+  assert.ok(!notesCatalogHtml.includes(`"${tempNoteId}"`), "Hidden note must NOT appear in notes catalog");
 
   const colHtml = fs.readFileSync(path.join(ROOT, "dist", "colloquiums", "index.html"), "utf8");
   assert.ok(!colHtml.includes(`data-id="${tempColId}"`), "Hidden colloquium question must NOT appear in student dictionary");
@@ -656,9 +659,11 @@ test("hiding and unhiding tests, notes, and colloquiums works end-to-end", async
   await handleApi(rN3, sN3, `/api/notes/${tempNoteId}`);
   assert.strictEqual(sN3.statusCode, 200);
 
-  const indexHtmlUnhidden = fs.readFileSync(path.join(ROOT, "dist", "index.html"), "utf8");
-  assert.ok(indexHtmlUnhidden.includes(`href="${tempTestId}/"`), "Unhidden test should appear on student home page");
-  assert.ok(indexHtmlUnhidden.includes(`notes/?id=${tempNoteId}`), "Unhidden note should appear on student home page");
+  const testsCatalogHtmlUnhidden = fs.readFileSync(path.join(ROOT, "dist", "tests", "index.html"), "utf8");
+  assert.ok(testsCatalogHtmlUnhidden.includes(`../${tempTestId}/`), "Unhidden test should appear in tests catalog");
+
+  const notesCatalogHtmlUnhidden = fs.readFileSync(path.join(ROOT, "dist", "notes", "index.html"), "utf8");
+  assert.ok(notesCatalogHtmlUnhidden.includes(`"${tempNoteId}"`), "Unhidden note should appear in notes catalog");
 
   // 5. Cleanup
   const { req: rDelT, res: sDelT } = mockReqRes("DELETE", `http://localhost/api/tests/${tempTestId}`);

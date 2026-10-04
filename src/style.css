@@ -4417,6 +4417,98 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
 
 /* ---------- 2. Главная страница (Портал & Hero) ---------- */
 
+.portal-capabilities-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 52rem) {
+  .portal-capabilities-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.portal-capability-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1.4rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.portal-capability-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.portal-capability-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+}
+
+.portal-capability-icon {
+  font-size: 1.85rem;
+  line-height: 1;
+}
+
+.portal-capability-tag {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.portal-capability-title {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.portal-capability-sub {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.portal-capability-desc {
+  margin: 0 0 1.25rem 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+  flex: 1;
+}
+
+.portal-capability-footer {
+  margin-top: auto;
+}
+
+.portal-bottom-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+}
+
+@media (max-width: 52rem) {
+  .portal-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .platform-container {
   max-width: 78rem;
   margin: 0 auto;

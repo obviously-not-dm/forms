@@ -36,9 +36,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   let candidateQuestions = topic === "all" ? pool : pool.filter((q) => q.topic === topic);
   if (!candidateQuestions.length) candidateQuestions = pool;
 
-  // Случайная выборка (shuffle)
-  const shuffled = [...candidateQuestions].sort(() => Math.random() - 0.5);
-  const selectedQuestions = shuffled.slice(0, count);
+  // Сохранение и восстановление выборки вопросов при перезагрузке
+  const sessionQuestionsKey = `trainer:custom_qids_${topic}_${count}`;
+  let selectedQuestions = [];
+  try {
+    const savedIds = JSON.parse(localStorage.getItem(sessionQuestionsKey));
+    if (Array.isArray(savedIds) && savedIds.length === count) {
+      const idMap = new Map(candidateQuestions.map((q) => [q.id, q]));
+      selectedQuestions = savedIds.map((id) => idMap.get(id)).filter(Boolean);
+    }
+  } catch {}
+
+  if (selectedQuestions.length !== count) {
+    const shuffled = [...candidateQuestions].sort(() => Math.random() - 0.5);
+    selectedQuestions = shuffled.slice(0, count);
+    try {
+      localStorage.setItem(sessionQuestionsKey, JSON.stringify(selectedQuestions.map((q) => q.id)));
+    } catch {}
+  }
 
   // Хранилище ответов
   const storeKey = "trainer:custom_test_session";
