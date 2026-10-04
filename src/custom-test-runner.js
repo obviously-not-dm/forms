@@ -1,7 +1,7 @@
 // Интерактивный запуск и прохождение сгенерированного случайного теста
 import { isAnswered, isCorrect, LETTERS } from "./grade.js";
 
-document.addEventListener("DOMContentLoaded", async () => {
+async function initCustomTestRunner() {
   const params = new URLSearchParams(window.location.search);
   const count = Math.max(3, Math.min(50, Number(params.get("count")) || 10));
   const topic = params.get("topic") || "all";
@@ -24,11 +24,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (totalCountEl) totalCountEl.textContent = count;
 
   let pool = [];
-  try {
-    const res = await fetch("../pool.json");
-    pool = await res.json();
-  } catch (e) {
-    questionsWrap.innerHTML = `<p class="table-error">Ошибка загрузки заданий: ${e.message}</p>`;
+  const candidateUrls = ["../pool.json", "/pool.json", "./pool.json", "pool.json"];
+  let loadErr = null;
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          pool = data;
+          break;
+        }
+      }
+    } catch (err) {
+      loadErr = err;
+    }
+  }
+
+  if (!pool.length) {
+    if (questionsWrap) {
+      questionsWrap.innerHTML = `<p class="table-error">Ошибка загрузки заданий: не удалось загрузить пул заданий курса. ${loadErr ? loadErr.message : ""}</p>`;
+    }
     return;
   }
 
@@ -280,4 +296,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
   }
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initCustomTestRunner);
+} else {
+  initCustomTestRunner();
+}

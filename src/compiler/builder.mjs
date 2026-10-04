@@ -636,6 +636,10 @@ export function build() {
     })))
   );
   fs.writeFileSync(path.join(DIST, "pool.json"), JSON.stringify(allQuestionsPool));
+  const distTestsDir = path.join(DIST, "tests");
+  if (fs.existsSync(distTestsDir)) {
+    fs.writeFileSync(path.join(distTestsDir, "pool.json"), JSON.stringify(allQuestionsPool));
+  }
 
   // Build admin & home
   const visibleColloquiumsCount = renderedColloquiums.filter((c) => !c.hidden).length;

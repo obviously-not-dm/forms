@@ -1,5 +1,5 @@
 // Каталог тренажёров, фильтры, статус решения, генератор тестов и избранные задания
-document.addEventListener("DOMContentLoaded", () => {
+function initCatalog() {
   // 1. Статусы тестов из localStorage
   document.querySelectorAll(".test-catalog-card").forEach((card) => {
     const testId = card.dataset.id;
@@ -51,7 +51,8 @@ document.addEventListener("DOMContentLoaded", () => {
     btnStartGen.addEventListener("click", () => {
       const topicSelect = document.getElementById("gen-topic-select");
       const topic = topicSelect?.value || "all";
-      const url = `custom.html?count=${selectedCount}&topic=${encodeURIComponent(topic)}&mode=${selectedMode}`;
+      const targetBase = window.location.pathname.endsWith("/") ? window.location.pathname : `${window.location.pathname}/`;
+      const url = `${targetBase}custom.html?count=${selectedCount}&topic=${encodeURIComponent(topic)}&mode=${selectedMode}`;
       window.location.href = url;
     });
   }
@@ -111,4 +112,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch {}
   }
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initCatalog);
+} else {
+  initCatalog();
+}

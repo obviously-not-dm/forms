@@ -35,9 +35,14 @@ function el(tag, attrs = {}, ...children) {
 }
 
 async function json(path, options = {}) {
-  const opts = { cache: "no-cache", ...options };
+  const opts = { cache: "no-cache", credentials: "same-origin", ...options };
+  opts.headers = { ...(opts.headers || {}) };
+  const token = localStorage.getItem("dm_admin_token");
+  if (token) {
+    opts.headers["Authorization"] = `Bearer ${token}`;
+  }
   if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
-    opts.headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+    opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(opts.body);
   }
   const r = await fetch(path, opts);
@@ -86,8 +91,10 @@ async function checkAuthSession() {
   try {
     const res = await json("/api/auth/session");
     if (res && res.authenticated) {
-      currentUser = res.user || { login: "admin@itmo.ru" };
-      return true;
+      if (res.user?.role === "admin" || res.user?.role === "teacher" || res.user?.id === "admin") {
+        currentUser = res.user || { login: "admin@itmo.ru", role: "admin" };
+        return true;
+      }
     }
   } catch (e) {
     console.warn("Session check failed:", e);
@@ -155,7 +162,10 @@ function login() {
           body: { login: userVal, password: passVal },
         });
         if (res.ok) {
-          currentUser = res.user || { login: userVal };
+          if (res.token) {
+            localStorage.setItem("dm_admin_token", res.token);
+          }
+          currentUser = res.user || { login: userVal, role: "admin" };
           renderAdmin();
           return;
         }
@@ -252,6 +262,7 @@ function renderAdmin() {
       if (client) {
         try { await client.auth.signOut(); } catch {}
       }
+      localStorage.removeItem("dm_admin_token");
       currentUser = null;
       login();
     },

@@ -68,35 +68,68 @@ export function getSession(req) {
   if (!req) return null;
   const cookies = parseCookies(req);
   const authHeader = req?.headers?.authorization || "";
-  const token = cookies.dm_session || cookies.dm_admin_session || (authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null);
-  if (!token) return null;
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
 
-  // 1. Check in-memory admin sessions
-  const memSess = activeSessions.get(token);
-  if (memSess) {
-    if (Date.now() - memSess.createdAt > 30 * 24 * 3600 * 1000) {
-      activeSessions.delete(token);
-      return null;
+  // 1. If explicit Bearer token is provided, prioritize it
+  if (bearer) {
+    const mem = activeSessions.get(bearer);
+    if (mem && Date.now() - mem.createdAt <= 30 * 24 * 3600 * 1000) {
+      return {
+        token: bearer,
+        user: mem.user,
+        role: mem.role,
+        userId: "admin",
+        userObj: { id: "admin", email: mem.user, name: "Преподаватель", role: "admin" },
+      };
     }
-    return {
-      token,
-      user: memSess.user,
-      role: memSess.role,
-      userId: "admin",
-      userObj: { id: "admin", email: memSess.user, name: "Преподаватель", role: "admin" },
-    };
+    const dbSess = getSessionByToken(bearer);
+    if (dbSess) {
+      return {
+        token: bearer,
+        user: dbSess.user?.email || dbSess.user?.name || "Пользователь",
+        role: dbSess.role || "student",
+        userId: dbSess.user?.id,
+        userObj: dbSess.user,
+      };
+    }
   }
 
-  // 2. Check DB sessions
-  const dbSess = getSessionByToken(token);
-  if (dbSess) {
-    return {
-      token,
-      user: dbSess.user?.email || dbSess.user?.name || "Пользователь",
-      role: dbSess.role || "student",
-      userId: dbSess.user?.id,
-      userObj: dbSess.user,
-    };
+  // 2. Check admin session cookie
+  if (cookies.dm_admin_session) {
+    const mem = activeSessions.get(cookies.dm_admin_session);
+    if (mem && Date.now() - mem.createdAt <= 30 * 24 * 3600 * 1000) {
+      return {
+        token: cookies.dm_admin_session,
+        user: mem.user,
+        role: mem.role,
+        userId: "admin",
+        userObj: { id: "admin", email: mem.user, name: "Преподаватель", role: "admin" },
+      };
+    }
+  }
+
+  // 3. Check student session cookie
+  if (cookies.dm_session) {
+    const dbSess = getSessionByToken(cookies.dm_session);
+    if (dbSess) {
+      return {
+        token: cookies.dm_session,
+        user: dbSess.user?.email || dbSess.user?.name || "Пользователь",
+        role: dbSess.role || "student",
+        userId: dbSess.user?.id,
+        userObj: dbSess.user,
+      };
+    }
+    const mem = activeSessions.get(cookies.dm_session);
+    if (mem && Date.now() - mem.createdAt <= 30 * 24 * 3600 * 1000) {
+      return {
+        token: cookies.dm_session,
+        user: mem.user,
+        role: mem.role,
+        userId: "admin",
+        userObj: { id: "admin", email: mem.user, name: "Преподаватель", role: "admin" },
+      };
+    }
   }
 
   return null;

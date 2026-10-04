@@ -67,6 +67,7 @@ export function authModalHtml(site = {}) {
       <div class="auth-tabs" role="tablist">
         <button type="button" class="auth-tab-btn active" data-tab="login" role="tab">Вход</button>
         <button type="button" class="auth-tab-btn" data-tab="register" role="tab">Регистрация</button>
+        <button type="button" class="auth-tab-btn" data-tab="teacher" role="tab">Преподаватель</button>
       </div>
       <button type="button" class="btn quiet btn-sm auth-close-btn" data-auth-close aria-label="Закрыть">✕</button>
     </div>
@@ -84,6 +85,20 @@ export function authModalHtml(site = {}) {
         </div>
         <div class="form-error" id="login-error" hidden></div>
         <button type="submit" class="btn primary btn-block" id="btn-login-submit">Войти</button>
+      </form>
+
+      <!-- Teacher Login Form -->
+      <form class="auth-form" id="auth-teacher-form" data-form="teacher" hidden>
+        <div class="form-group">
+          <label class="form-label" for="teacher-login-email">Логин или Email преподавателя</label>
+          <input type="text" id="teacher-login-email" class="form-input" placeholder="admin@itmo.ru" value="admin@itmo.ru" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="teacher-login-password">Пароль</label>
+          <input type="password" id="teacher-login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <div class="form-error" id="teacher-login-error" hidden></div>
+        <button type="submit" class="btn primary btn-block" id="btn-teacher-submit">Войти как преподаватель</button>
       </form>
 
       <!-- Register Form -->
@@ -653,7 +668,7 @@ ${navbarHtml("", "home", site)}
           Проверочные работы по всем разделам курса (множества, отношения, соответствия, графы, булева логика). Поддержка режимов экзамена и тренировки с подсказками, генератор случайных вариантов и сохранение ответов при перезагрузке страницы.
         </p>
         <div class="portal-capability-footer">
-          <a href="tests/" class="btn primary btn-sm">Открыть тренажёры →</a>
+          <a href="tests/" class="btn quiet btn-sm">Открыть тренажёры →</a>
         </div>
       </article>
 

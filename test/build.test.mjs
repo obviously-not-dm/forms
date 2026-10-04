@@ -927,10 +927,12 @@ test("tests catalog, custom test runner, and question pool are correctly generat
   const testsIndexFile = path.resolve("dist/tests/index.html");
   const customTestFile = path.resolve("dist/tests/custom.html");
   const poolFile = path.resolve("dist/pool.json");
+  const poolTestsFile = path.resolve("dist/tests/pool.json");
 
   assert.ok(fs.existsSync(testsIndexFile), "dist/tests/index.html must exist");
   assert.ok(fs.existsSync(customTestFile), "dist/tests/custom.html must exist");
   assert.ok(fs.existsSync(poolFile), "dist/pool.json must exist");
+  assert.ok(fs.existsSync(poolTestsFile), "dist/tests/pool.json must exist");
 
   const catalogHtml = fs.readFileSync(testsIndexFile, "utf8");
   assert.ok(catalogHtml.includes("tests-catalog-grid"), "Catalog page must contain tests catalog grid");
@@ -945,6 +947,13 @@ test("tests catalog, custom test runner, and question pool are correctly generat
   assert.ok(Array.isArray(pool), "dist/pool.json must be an array");
   assert.ok(pool.length >= 350, `Pool must contain 350+ questions, got ${pool.length}`);
   assert.ok(pool[0].testId && pool[0].id && pool[0].type, "Question must have testId, id, type");
+
+  // Verify uniform capability buttons and teacher tab in index.html
+  const indexHtml = fs.readFileSync(path.resolve("dist/index.html"), "utf8");
+  assert.ok(indexHtml.includes('<a href="tests/" class="btn quiet btn-sm">Открыть тренажёры →</a>'), "Card 1 button must be btn quiet btn-sm");
+  assert.ok(indexHtml.includes('data-tab="teacher"'), "Auth modal must have teacher tab");
+  assert.ok(indexHtml.includes('id="auth-teacher-form"'), "Auth modal must have teacher login form");
+  assert.ok(!indexHtml.includes("admin.html"), "index.html must not contain static link to admin.html");
 });
 
 

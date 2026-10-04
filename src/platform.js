@@ -43,7 +43,10 @@ class DMPlatform {
 
   async checkAuth() {
     try {
-      const res = await fetch("/api/auth/session");
+      const headers = {};
+      const adminToken = localStorage.getItem("dm_admin_token");
+      if (adminToken) headers["Authorization"] = `Bearer ${adminToken}`;
+      const res = await fetch("/api/auth/session", { headers, credentials: "same-origin" });
       if (res.ok) {
         const data = await res.json();
         if (data.authenticated && data.user) {
@@ -84,7 +87,7 @@ class DMPlatform {
       slot.innerHTML = `
         <div class="user-capsule admin-capsule">
           <a href="/admin.html" class="user-capsule-link" title="Перейти в панель управления">
-            🎓 Преподаватель
+            🎓 Панель преподавателя
           </a>
           <button type="button" class="btn quiet btn-xs btn-logout" id="btn-logout" title="Выйти">✕</button>
         </div>
@@ -110,8 +113,11 @@ class DMPlatform {
     if (logoutBtn) {
       logoutBtn.onclick = async () => {
         try {
-          await fetch("/api/auth/logout", { method: "POST" });
+          const adminToken = localStorage.getItem("dm_admin_token");
+          const headers = adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
+          await fetch("/api/auth/logout", { method: "POST", headers, credentials: "same-origin" });
         } catch {}
+        localStorage.removeItem("dm_admin_token");
         window.location.reload();
       };
     }
@@ -167,6 +173,7 @@ class DMPlatform {
           const res = await fetch("/api/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
             body: JSON.stringify({ login: email, password }),
           });
           const data = await res.json();
@@ -177,11 +184,57 @@ class DMPlatform {
             }
             return;
           }
+          if (data.token) {
+            localStorage.setItem("dm_admin_token", data.token);
+          }
           this.closeModal();
+          if (data.user?.role === "admin") {
+            window.location.href = "/admin.html";
+            return;
+          }
           window.location.reload();
         } catch (err) {
           if (errEl) {
             errEl.textContent = "Ошибка сети при входе";
+            errEl.hidden = false;
+          }
+        }
+      };
+    }
+
+    // Teacher Form Submit
+    const teacherForm = document.getElementById("auth-teacher-form");
+    if (teacherForm) {
+      teacherForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("teacher-login-email")?.value.trim();
+        const password = document.getElementById("teacher-login-password")?.value;
+        const errEl = document.getElementById("teacher-login-error");
+        if (errEl) errEl.hidden = true;
+
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ login: email, password }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            if (errEl) {
+              errEl.textContent = data.error || "Неверный логин или пароль преподавателя";
+              errEl.hidden = false;
+            }
+            return;
+          }
+          if (data.token) {
+            localStorage.setItem("dm_admin_token", data.token);
+          }
+          this.closeModal();
+          window.location.href = "/admin.html";
+        } catch (err) {
+          if (errEl) {
+            errEl.textContent = "Ошибка сети при входе преподавателя";
             errEl.hidden = false;
           }
         }
@@ -204,6 +257,7 @@ class DMPlatform {
           const res = await fetch("/api/auth/register", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
             body: JSON.stringify({ name, group, email, password }),
           });
           const data = await res.json();
@@ -246,8 +300,10 @@ class DMPlatform {
     });
     const loginForm = document.getElementById("auth-login-form");
     const regForm = document.getElementById("auth-register-form");
+    const teacherForm = document.getElementById("auth-teacher-form");
     if (loginForm) loginForm.hidden = tab !== "login";
     if (regForm) regForm.hidden = tab !== "register";
+    if (teacherForm) teacherForm.hidden = tab !== "teacher";
   }
 
   // ==========================================
