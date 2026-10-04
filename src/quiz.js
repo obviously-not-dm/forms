@@ -2,7 +2,7 @@ import { grade, isAnswered, isCorrect, parseSet, parseNumber, LETTERS } from "./
 import { db } from "./db.js";
 
 const body = document.body;
-const testId = body.dataset.id;
+const testId = body.dataset.id || window.location.pathname.replace(/^\/|\/$/g, "").split("/").pop();
 const storeKey = `trainer:${testId}`;
 const articles = [...document.querySelectorAll(".q")];
 const byId = new Map(articles.map((a) => [a.dataset.id, a]));
@@ -25,14 +25,28 @@ function fresh(mode = "exam") {
 
 function restore() {
   try {
-    const s = JSON.parse(localStorage.getItem(storeKey));
-    if (s && s.answers) return { ...fresh(), ...s };
+    let s = null;
+    try { s = JSON.parse(localStorage.getItem(storeKey)); } catch {}
+    if (!s) {
+      try { s = JSON.parse(sessionStorage.getItem(storeKey)); } catch {}
+    }
+    if (s && s.answers) {
+      const stateObj = { ...fresh(), ...s };
+      if (Object.keys(stateObj.answers).length > 0 && !stateObj.startedAt) {
+        stateObj.startedAt = Date.now();
+      }
+      return stateObj;
+    }
   } catch {}
   return fresh();
 }
 
 function persist() {
-  try { localStorage.setItem(storeKey, JSON.stringify(state)); } catch {}
+  try {
+    const data = JSON.stringify(state);
+    localStorage.setItem(storeKey, data);
+    sessionStorage.setItem(storeKey, data);
+  } catch {}
 }
 
 function loadKey() {
@@ -63,7 +77,10 @@ function applyScope() {
 
 function valueOf(article) {
   const type = article.dataset.type;
-  if (type === "text") return article.querySelector(".text-input").value;
+  if (type === "text") {
+    const input = article.querySelector(".text-input");
+    return input ? input.value : "";
+  }
   const checked = [...article.querySelectorAll("input:checked")].map((i) => Number(i.value));
   return type === "single" ? (checked.length ? checked[0] : null) : checked;
 }
@@ -71,11 +88,23 @@ function valueOf(article) {
 function applyValue(article, value) {
   const type = article.dataset.type;
   if (type === "text") {
-    article.querySelector(".text-input").value = value ?? "";
+    const input = article.querySelector(".text-input");
+    if (input) input.value = (value !== null && value !== undefined) ? String(value) : "";
     return;
   }
-  const set = new Set(type === "single" ? [value] : value || []);
-  for (const input of article.querySelectorAll("input")) input.checked = set.has(Number(input.value));
+  if (type === "single") {
+    const targetVal = (value !== null && value !== undefined && value !== "") ? Number(value) : null;
+    for (const input of article.querySelectorAll('input[type="radio"]')) {
+      input.checked = targetVal !== null && Number(input.value) === targetVal;
+    }
+    return;
+  }
+  if (type === "multiple") {
+    const set = new Set(Array.isArray(value) ? value.map(Number) : []);
+    for (const input of article.querySelectorAll('input[type="checkbox"]')) {
+      input.checked = set.has(Number(input.value));
+    }
+  }
 }
 
 function isDone(a) {
@@ -116,6 +145,7 @@ function updateProgress() {
     flag.setAttribute("aria-pressed", flagged);
     flag.textContent = flagged ? "Отмечено: вернуться позже" : "Вернуться позже";
     a.classList.toggle("flagged", flagged);
+    a.classList.toggle("is-answered", isDone(a));
   }
 }
 
@@ -154,14 +184,17 @@ function next(article) {
 }
 
 for (const a of articles) {
-  a.addEventListener("input", () => {
+  const onAnswerChange = () => {
     resetConfirm();
     state.answers[a.dataset.id] = valueOf(a);
+    ensureStarted();
     persist();
     updateProgress();
     const warn = a.querySelector(".format-warn");
     if (warn && !warn.hidden && !formatProblem(a)) warn.hidden = true;
-  });
+  };
+  a.addEventListener("input", onAnswerChange);
+  a.addEventListener("change", onAnswerChange);
   a.querySelector(".q-prev-btn")?.addEventListener("click", () => prev(a));
   a.querySelector(".q-next-btn")?.addEventListener("click", () => next(a));
   a.querySelector(".flag-btn").addEventListener("click", () => {
@@ -194,6 +227,18 @@ for (const a of articles) {
     });
   }
 }
+
+// Защита от сброса ответов при обновлении (F5 / Cmd+R)
+window.addEventListener("beforeunload", () => {
+  for (const a of articles) {
+    const val = valueOf(a);
+    if (isAnswered(a.dataset.type, val)) {
+      state.answers[a.dataset.id] = val;
+    }
+  }
+  ensureStarted();
+  persist();
+});
 
 // Предупреждение о сохранении при переходе назад
 document.querySelectorAll(".topbar-back, #quiz-back-link").forEach((link) => {

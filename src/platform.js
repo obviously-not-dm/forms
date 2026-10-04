@@ -672,7 +672,7 @@ class DMPlatform {
                 Войти в контест →
               </a>
               <button type="button" class="btn quiet btn-sm" onclick="window.dmPlatform.showStandingsModal('${c.id}')">
-                Турнирная таблица
+                📊 Результаты и статистика
               </button>
             </div>
           </div>
@@ -687,14 +687,14 @@ class DMPlatform {
             <div class="contest-card-status finished">Завершён</div>
             <h3 class="contest-card-title">${this.escape(c.title)}</h3>
             <div class="contest-card-meta">
-              <span>Группа: <strong>${this.escape(c.group_name === "all" ? "Все" : c.group_name)}</strong></span>
+              <span>Группа: <strong>${this.escape(c.group_name === "all" ? "Все группы" : c.group_name)}</strong></span>
               <span>Длительность: ${c.duration_minutes} мин</span>
               <span>Всего участников: <strong>${c.submissions_count || 0}</strong></span>
               <span>Завершён: ${new Date(c.ends_at).toLocaleDateString("ru-RU")}</span>
             </div>
             <div class="contest-card-actions">
               <button type="button" class="btn quiet btn-sm" onclick="window.dmPlatform.showStandingsModal('${c.id}')">
-                🏆 Посмотреть Standings (${c.submissions_count || 0})
+                📊 Итоги и статистика (${c.submissions_count || 0})
               </button>
             </div>
           </div>
@@ -711,17 +711,20 @@ class DMPlatform {
       dialog = document.createElement("dialog");
       dialog.id = "standings-dialog";
       dialog.className = "standings-modal-dialog";
+      dialog.addEventListener("click", (e) => {
+        if (e.target === dialog) dialog.close();
+      });
       document.body.appendChild(dialog);
     }
 
     dialog.innerHTML = `
       <div class="standings-modal-box">
         <div class="standings-modal-header">
-          <h3>🏆 Турнирная таблица контеста</h3>
-          <button type="button" class="btn quiet btn-sm" onclick="document.getElementById('standings-dialog').close()">✕</button>
+          <h3>📊 Результаты и статистика контеста</h3>
+          <button type="button" class="btn quiet btn-sm" onclick="document.getElementById('standings-dialog').close()" aria-label="Закрыть">✕ Закрыть</button>
         </div>
         <div class="standings-modal-body" id="standings-modal-content">
-          <p class="table-loading">Загружаем результаты…</p>
+          <p class="table-loading">Загружаем аналитику и результаты…</p>
         </div>
       </div>
     `;
@@ -732,11 +735,49 @@ class DMPlatform {
       const data = await res.json();
       const bodyEl = document.getElementById("standings-modal-content");
       if (!data.standings || !data.standings.length) {
-        bodyEl.innerHTML = '<p class="muted">Пока нет сданных работ в этом контесте.</p>';
+        bodyEl.innerHTML = `
+          <div style="padding: 2rem 1rem; text-align: center;">
+            <p class="muted" style="margin-bottom: 0.5rem; font-size: 1.05rem;">По этому контесту пока нет сданных работ.</p>
+            <p style="font-size: 0.9rem; color: var(--muted);">Как только студенты начнут отправлять решения на паре, здесь появится подробная статистика и турнирная таблица.</p>
+          </div>
+        `;
         return;
       }
 
+      const total = data.standings.length;
+      const avgScore = Math.round((data.standings.reduce((s, r) => s + (r.score || 0), 0) / total) * 10) / 10;
+      const maxScore = data.standings[0]?.max_score || 1;
+      const avgPct = Math.round(data.standings.reduce((s, r) => s + (r.percentage || 0), 0) / total);
+      const passedCount = data.standings.filter((r) => r.percentage >= 60).length;
+      const passRate = Math.round((passedCount / total) * 100);
+      const avgSec = Math.round(data.standings.reduce((s, r) => s + (r.duration_sec || 0), 0) / total);
+      const avgTimeStr = `${Math.floor(avgSec / 60)} мин ${avgSec % 60} с`;
+      const best = data.standings[0];
+
       bodyEl.innerHTML = `
+        <div class="contest-modal-kpi-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem;">
+          <div class="kpi-card" style="padding: 0.75rem 1rem; background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-md);">
+            <div class="kpi-label" style="font-size: 0.8rem; color: var(--muted);">Участников</div>
+            <div class="kpi-val" style="font-size: 1.4rem; font-weight: 700;">${total}</div>
+            <div class="kpi-sub" style="font-size: 0.75rem; color: var(--muted);">сдали работу</div>
+          </div>
+          <div class="kpi-card" style="padding: 0.75rem 1rem; background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-md);">
+            <div class="kpi-label" style="font-size: 0.8rem; color: var(--muted);">Средний балл</div>
+            <div class="kpi-val" style="font-size: 1.4rem; font-weight: 700; color: ${avgPct >= 60 ? 'var(--ok)' : 'var(--accent)'};">${avgScore} / ${maxScore}</div>
+            <div class="kpi-sub" style="font-size: 0.75rem; color: var(--muted);">${avgPct}% верных</div>
+          </div>
+          <div class="kpi-card" style="padding: 0.75rem 1rem; background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-md);">
+            <div class="kpi-label" style="font-size: 0.8rem; color: var(--muted);">Зачёт (≥60%)</div>
+            <div class="kpi-val" style="font-size: 1.4rem; font-weight: 700; color: ${passRate >= 50 ? 'var(--ok)' : 'var(--bad)'};">${passRate}%</div>
+            <div class="kpi-sub" style="font-size: 0.75rem; color: var(--muted);">${passedCount} из ${total} студ.</div>
+          </div>
+          <div class="kpi-card" style="padding: 0.75rem 1rem; background: var(--sunken); border: 1px solid var(--line); border-radius: var(--radius-md);">
+            <div class="kpi-label" style="font-size: 0.8rem; color: var(--muted);">Среднее время</div>
+            <div class="kpi-val" style="font-size: 1.4rem; font-weight: 700;">${avgTimeStr}</div>
+            <div class="kpi-sub" style="font-size: 0.75rem; color: var(--muted);">Лидер: ${this.escape(best?.user_name || '—')}</div>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="leaderboard-table">
             <thead>
@@ -745,7 +786,7 @@ class DMPlatform {
                 <th>Студент</th>
                 <th>Группа</th>
                 <th>Баллы</th>
-                <th>Процент</th>
+                <th>Результат</th>
                 <th>Время</th>
               </tr>
             </thead>
@@ -756,7 +797,14 @@ class DMPlatform {
                   <td><strong>${this.escape(s.user_name)}</strong></td>
                   <td><span class="group-pill">${this.escape(s.group_name || "—")}</span></td>
                   <td><strong>${s.score} / ${s.max_score}</strong></td>
-                  <td>${s.percentage}%</td>
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <div class="progress-bar-track" style="width: 60px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden;">
+                        <div style="width: ${s.percentage}%; height: 100%; background: ${s.percentage >= 60 ? 'var(--ok)' : 'var(--accent)'};"></div>
+                      </div>
+                      <span style="font-weight: 600; font-size: 0.85rem;">${s.percentage}%</span>
+                    </div>
+                  </td>
                   <td>${Math.round(s.duration_sec / 60)} мин ${s.duration_sec % 60} сек</td>
                 </tr>
               `).join("")}
@@ -851,17 +899,84 @@ class DMPlatform {
       const doc = new DOMParser().parseFromString(pageHtml, "text/html");
       const articles = doc.querySelectorAll("article.q");
 
+      const contestStoreKey = `contest_answers:${contestId}`;
+      let savedContestAnswers = {};
+      try {
+        savedContestAnswers = JSON.parse(localStorage.getItem(contestStoreKey)) || {};
+      } catch {}
+
       container.innerHTML = "";
       articles.forEach((art) => {
         // Remove individual check/hint buttons for strict exam contest
         art.querySelectorAll(".check-btn, .hint-btn, .flag-btn, .review, .hints").forEach((el) => el.remove());
-        container.appendChild(document.importNode(art, true));
+        const imported = document.importNode(art, true);
+        const qId = imported.dataset.id;
+        const type = imported.dataset.type;
+        const val = savedContestAnswers[qId];
+        if (val !== undefined && val !== null) {
+          if (type === "text") {
+            const inp = imported.querySelector("input.text-input");
+            if (inp) inp.value = String(val);
+          } else if (type === "single") {
+            const rad = imported.querySelector(`input[type=radio][value="${val}"]`);
+            if (rad) rad.checked = true;
+          } else if (type === "multiple" && Array.isArray(val)) {
+            val.forEach((v) => {
+              const cb = imported.querySelector(`input[type=checkbox][value="${v}"]`);
+              if (cb) cb.checked = true;
+            });
+          }
+        }
+        container.appendChild(imported);
       });
 
       // Render math with KaTeX if present
       if (window.renderMathInElement) {
         window.renderMathInElement(container);
       }
+
+      const collectContestAnswers = () => {
+        const answers = {};
+        let done = 0;
+        container.querySelectorAll("article.q").forEach((art) => {
+          const qId = art.dataset.id;
+          const type = art.dataset.type;
+
+          if (type === "text") {
+            const val = art.querySelector("input.text-input")?.value;
+            if (val !== undefined && val.trim() !== "") {
+              answers[qId] = val.trim();
+              done++;
+            }
+          } else if (type === "single") {
+            const checked = art.querySelector("input[type=radio]:checked");
+            if (checked) {
+              answers[qId] = Number(checked.value);
+              done++;
+            }
+          } else if (type === "multiple") {
+            const checked = Array.from(art.querySelectorAll("input[type=checkbox]:checked")).map((cb) => Number(cb.value));
+            if (checked.length) {
+              answers[qId] = checked;
+              done++;
+            }
+          const isAnswered = answers[qId] !== undefined;
+          art.classList.toggle("is-answered", isAnswered);
+        });
+        try {
+          localStorage.setItem(contestStoreKey, JSON.stringify(answers));
+        } catch {}
+        const countEl = document.getElementById("room-answered-count");
+        if (countEl) {
+          countEl.textContent = `Отвечено: ${done} из ${articles.length}`;
+        }
+        return answers;
+      };
+
+      container.addEventListener("input", collectContestAnswers);
+      container.addEventListener("change", collectContestAnswers);
+      window.addEventListener("beforeunload", collectContestAnswers);
+      collectContestAnswers();
 
       // Collect answers on submit
       const startTime = Date.now();
@@ -872,29 +987,7 @@ class DMPlatform {
         isSubmitted = true;
         clearInterval(timerInterval);
 
-        const answers = {};
-        container.querySelectorAll("article.q").forEach((art) => {
-          const qId = art.dataset.id;
-          const type = art.dataset.type;
-
-          if (type === "text") {
-            const val = art.querySelector("input.text-input")?.value;
-            if (val !== undefined && val.trim() !== "") {
-              answers[qId] = val.trim();
-            }
-          } else if (type === "single") {
-            const checked = art.querySelector("input[type=radio]:checked");
-            if (checked) {
-              answers[qId] = Number(checked.value);
-            }
-          } else if (type === "multiple") {
-            const checked = Array.from(art.querySelectorAll("input[type=checkbox]:checked")).map((cb) => Number(cb.value));
-            if (checked.length) {
-              answers[qId] = checked;
-            }
-          }
-        });
-
+        const answers = collectContestAnswers();
         const durationSec = Math.floor((Date.now() - startTime) / 1000);
 
         try {
@@ -905,6 +998,8 @@ class DMPlatform {
           });
           const submitData = await submitRes.json();
           if (!submitRes.ok) throw new Error(submitData.error || "Ошибка отправки");
+
+          try { localStorage.removeItem(contestStoreKey); } catch {}
 
           const sub = submitData.submission;
           container.innerHTML = `

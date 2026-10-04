@@ -180,11 +180,18 @@ export function quizPage(test, site = {}) {
   `).join("");
 
   return `${head(meta.title || test.id, "../", "", test.math)}
-<body class="quiz" data-id="${esc(test.id)}" data-count="${count}" data-group-pattern="${esc(site.groupPattern || "")}">
-<header class="topbar">
-  <a class="topbar-back" href="../" aria-label="Все тесты">Все тесты</a>
-  <span class="topbar-title">${esc(meta.title || test.id)}</span>
-  <button class="topbar-count" id="map-open" type="button" aria-label="Карта заданий"><span id="count">0</span>&thinsp;/&thinsp;<span id="total">${count}</span></button>
+<body class="quiz platform-body" data-id="${esc(test.id)}" data-count="${count}" data-group-pattern="${esc(site.groupPattern || "")}">
+${navbarHtml("../", "tests", site)}
+<header class="quiz-subtopbar">
+  <div class="quiz-subtopbar-inner">
+    <div class="quiz-subtopbar-left">
+      <a class="topbar-back" href="../" aria-label="Все тренажёры">← Все тренажёры</a>
+      <span class="topbar-title">${esc(meta.title || test.id)}</span>
+    </div>
+    <div class="quiz-subtopbar-right">
+      <button class="topbar-count" id="map-open" type="button" aria-label="Карта заданий"><span id="count">0</span>&thinsp;/&thinsp;<span id="total">${count}</span></button>
+    </div>
+  </div>
   <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
 </header>
 <div class="quiz-layout">
@@ -317,6 +324,8 @@ export function quizPage(test, site = {}) {
     </div>
   </div>
 </dialog>
+${authModalHtml(site)}
+<script type="module" src="../js/platform.js"></script>
 <script type="module" src="../js/quiz.js"></script>
 </body>
 </html>
@@ -603,19 +612,55 @@ export function indexPage(tests = [], notes = [], site = {}, colloquiumsCount = 
 ${navbarHtml("", "home", site)}
 
 <main class="platform-container">
-  <!-- Sort-Me Inspired Hero Banner -->
+  <!-- Clean Portal Hero -->
   <section class="portal-hero">
     <div class="hero-badge">🎓 Университетский курс · Факультет ИТ</div>
     <h1 class="hero-title">${esc(site.title || "Дискретная математика")}</h1>
     <p class="hero-desc">
-      Интерактивная образовательная платформа: онлайн-тренажёры, экспресс-летучки на парах, конспекты лекций и полный справочник определений к коллоквиумам.
+      Интерактивная платформа курса: онлайн-тренажёры, контрольные летучки на занятиях, конспекты лекций и подготовка к коллоквиумам.
     </p>
     <div class="hero-actions">
-      <a href="#tests" class="btn primary">📋 Начать тренировку</a>
-      <a href="contests/" class="btn quiet">⏱️ Онлайн-контесты</a>
-      <a href="leaderboard/" class="btn quiet">🏆 Рейтинг студентов</a>
+      <a href="#tests" class="btn primary">📋 К тренажёрам</a>
+      <a href="contests/" class="btn quiet">⏱️ Летучки на парах</a>
+      <a href="leaderboard/" class="btn quiet">🏆 Рейтинг курса</a>
     </div>
   </section>
+
+  <!-- Quick Access Portal Grid (4 Key Course Sections) -->
+  <div class="portal-modules-grid">
+    <a href="#tests" class="portal-module-card" onclick="document.querySelector('.home-tab-btn[data-tab=tests]')?.click()">
+      <div class="portal-module-icon">📋</div>
+      <div class="portal-module-body">
+        <div class="portal-module-title">Тренажёры курса</div>
+        <div class="portal-module-sub">${visible.length} тестов · Самопроверка и экзамен</div>
+      </div>
+      <div class="portal-module-arrow">→</div>
+    </a>
+    <a href="contests/" class="portal-module-card highlight">
+      <div class="portal-module-icon">⏱️</div>
+      <div class="portal-module-body">
+        <div class="portal-module-title">Онлайн-контесты</div>
+        <div class="portal-module-sub">Экспресс-летучки на парах с таймером</div>
+      </div>
+      <div class="portal-module-arrow">→</div>
+    </a>
+    <a href="notes/" class="portal-module-card">
+      <div class="portal-module-icon">📚</div>
+      <div class="portal-module-body">
+        <div class="portal-module-title">Конспекты и лекции</div>
+        <div class="portal-module-sub">${visibleNotes.length} тем · Формулы KaTeX и поиск</div>
+      </div>
+      <div class="portal-module-arrow">→</div>
+    </a>
+    <a href="colloquiums/" class="portal-module-card">
+      <div class="portal-module-icon">🎓</div>
+      <div class="portal-module-body">
+        <div class="portal-module-title">Коллоквиумы</div>
+        <div class="portal-module-sub">${colloquiumsCount} определений · Карточки Quizlet</div>
+      </div>
+      <div class="portal-module-arrow">→</div>
+    </a>
+  </div>
 
   <!-- Dynamic Active Contest Alert Banner (populated by JS) -->
   <div id="home-active-contest-banner" class="home-contest-banner" hidden></div>
@@ -649,12 +694,20 @@ ${navbarHtml("", "home", site)}
       </div>
 
       <div class="home-tab-panel" data-panel="notes">
+        <div class="home-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+          <span style="font-weight: 600; color: var(--muted); font-size: 0.9rem;">📚 Теория и лекции по темам курса</span>
+          <a href="notes/" class="btn quiet btn-sm">Открыть полный раздел конспектов →</a>
+        </div>
         <div class="notes-grid">
           ${notesCards || '<p class="muted">Конспекты пока не добавлены.</p>'}
         </div>
       </div>
 
       <div class="home-tab-panel" data-panel="colloquiums">
+        <div class="home-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+          <span style="font-weight: 600; color: var(--muted); font-size: 0.9rem;">🎓 Определения и формулы к коллоквиумам</span>
+          <a href="colloquiums/" class="btn quiet btn-sm">Открыть справочник определений →</a>
+        </div>
         <div class="colloquiums-home-grid">
           <div class="colloquium-promo-card">
             <div class="colloquium-promo-icon">🎓</div>
