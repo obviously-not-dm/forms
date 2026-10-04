@@ -41,7 +41,7 @@ export function navbarHtml(rel = "", activeTab = "", site = {}) {
     <nav class="topbar-nav" id="platform-nav">
       <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">🏠 Главная</a>
       <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">⏱️ Контесты</a>
-      <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}#tests">📋 Тренажёры</a>
+      <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}tests/">📋 Тренажёры</a>
       <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">📚 Конспекты</a>
       <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">🎓 Коллоквиумы</a>
       <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">🏆 Рейтинг</a>
@@ -149,8 +149,7 @@ export function questionHtml(q) {
     ${answer}
     ${hints}
     <div class="q-tools">
-      <button class="btn quiet q-prev-btn" type="button" title="Предыдущее задание">← Предыдущее</button>
-      <button class="btn quiet q-next-btn" type="button" title="Следующее задание">Следующее →</button>
+      <button class="btn quiet favorite-btn" type="button" aria-pressed="false" title="Сохранить в избранные задания">⭐ В избранное</button>
       ${q.hintsHtml && q.hintsHtml.length ? `<button class="btn quiet hint-btn" type="button">Подсказка</button>` : ""}
       <button class="btn quiet check-btn" type="button">Проверить</button>
       <button class="btn quiet flag-btn" type="button" aria-pressed="false">Вернуться позже</button>
@@ -202,30 +201,38 @@ ${navbarHtml("../", "tests", site)}
     <p class="meta">${tasksWord(count)}${meta.topic && meta.topic !== "Общее" ? ` · ${esc(meta.topic)}` : ""}</p>
   </section>
 
-  <section class="start" id="start">
+  <section class="start pretest-modal-card" id="start">
+    <div class="pretest-card-header">
+      <div class="pretest-badge">Начало тестирования</div>
+      <h2 style="font-size: 1.35rem; margin: 0.5rem 0 0.35rem;">Выберите режим прохождения</h2>
+      <p class="muted" style="margin: 0 0 1.25rem; font-size: 0.92rem;">Вопросы теста откроются сразу после нажатия кнопки «Начать тестирование».</p>
+    </div>
     ${site.groups && site.groups.length ? `
-    <label class="group-field">
-      <span class="field-label">Группа (необязательно)</span>
+    <label class="group-field" style="margin-bottom: 1.25rem;">
+      <span class="field-label">Учебная группа</span>
       <input id="group" type="text" list="groups" placeholder="M3101" autocomplete="off"
              autocapitalize="characters" spellcheck="false" maxlength="12">
       <datalist id="groups">${groups}</datalist>
       <span class="field-error" id="group-error" hidden></span>
     </label>` : ""}
     <fieldset class="modes">
-      <legend class="field-label">Как проходить</legend>
+      <legend class="field-label">Формат проверки:</legend>
       <label class="mode">
         <input type="radio" name="mode" value="exam" checked>
-        <span class="mode-name">Проверка в конце</span>
-        <span class="mode-desc">Отвечаете на все задания, потом смотрите результат и разбор</span>
+        <span class="mode-name">⏱️ Экзамен (проверка в конце)</span>
+        <span class="mode-desc">Отвечаете на все задания теста, после чего завершаете работу и получаете итоговые баллы, процент и подробный разбор решений.</span>
       </label>
       <label class="mode">
         <input type="radio" name="mode" value="practice">
-        <span class="mode-name">Тренировка</span>
-        <span class="mode-desc">Можно проверить каждое задание сразу и взять подсказку</span>
+        <span class="mode-name">💡 Тренировка (с подсказками)</span>
+        <span class="mode-desc">Можно проверять каждое задание сразу после ответа, открывать теоретические подсказки и разбирать ошибки шаг за шагом.</span>
       </label>
     </fieldset>
-    <p class="mode-later">Режим можно поменять и во время прохождения.</p>
-    <button class="btn primary" id="start-btn" type="button">Начать</button>
+    <div class="pretest-action-wrap" style="margin-top: 1.5rem;">
+      <button class="btn primary btn-lg" id="start-btn" type="button" style="width: 100%; padding: 0.85rem; font-size: 1.05rem; font-weight: 700;">
+        🚀 Начать тестирование (${count} ${tasksWord(count)})
+      </button>
+    </div>
   </section>
 
   <div class="mode-bar" id="mode-bar">
@@ -617,10 +624,10 @@ ${navbarHtml("", "home", site)}
     <div class="hero-badge">🎓 Университетский курс · Факультет ИТ</div>
     <h1 class="hero-title">${esc(site.title || "Дискретная математика")}</h1>
     <p class="hero-desc">
-      Интерактивная платформа курса: онлайн-тренажёры, контрольные летучки на занятиях, конспекты лекций и подготовка к коллоквиумам.
+      Интерактивная образовательная платформа курса: онлайн-тренажёры, контрольные летучки на занятиях, конспекты лекций с формулами и подготовка к коллоквиумам.
     </p>
     <div class="hero-actions">
-      <a href="#tests" class="btn primary">📋 К тренажёрам</a>
+      <a href="tests/" class="btn primary">📋 К тренажёрам</a>
       <a href="contests/" class="btn quiet">⏱️ Летучки на парах</a>
       <a href="leaderboard/" class="btn quiet">🏆 Рейтинг курса</a>
     </div>
@@ -628,11 +635,11 @@ ${navbarHtml("", "home", site)}
 
   <!-- Quick Access Portal Grid (4 Key Course Sections) -->
   <div class="portal-modules-grid">
-    <a href="#tests" class="portal-module-card" onclick="document.querySelector('.home-tab-btn[data-tab=tests]')?.click()">
+    <a href="tests/" class="portal-module-card">
       <div class="portal-module-icon">📋</div>
       <div class="portal-module-body">
-        <div class="portal-module-title">Тренажёры курса</div>
-        <div class="portal-module-sub">${visible.length} тестов · Самопроверка и экзамен</div>
+        <div class="portal-module-title">Тренажёры и генератор</div>
+        <div class="portal-module-sub">${visible.length} тестов · Случайные варианты · Избранное</div>
       </div>
       <div class="portal-module-arrow">→</div>
     </a>
@@ -668,6 +675,42 @@ ${navbarHtml("", "home", site)}
   <!-- Student Snapshot Card (if logged in, populated by JS) -->
   <div id="home-student-card" hidden></div>
 
+  <!-- Course Onboarding Guide (Что делать, зачем и куда) -->
+  <section class="portal-guide-section" style="margin-bottom: 2rem;">
+    <div class="section-title-wrap" style="margin-bottom: 1rem;">
+      <h2 class="section-title">🧭 Как устроен курс и как по нему заниматься</h2>
+      <p class="section-subtitle" style="color: var(--muted); font-size: 0.95rem; margin-top: 0.25rem;">
+        Пошаговое руководство для успешной сдачи рубежных контролей, летучек и экзамена.
+      </p>
+    </div>
+    <div class="guide-steps-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
+        <div class="guide-step-badge" style="font-weight: 700; color: var(--accent); margin-bottom: 0.4rem;">Шаг 1 · Теория</div>
+        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Конспекты и лекции</h3>
+        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Изучайте определения, свойства и доказательства с формулами KaTeX и удобным поиском.</p>
+        <a href="notes/" class="btn quiet btn-sm">Открыть конспекты →</a>
+      </div>
+      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
+        <div class="guide-step-badge" style="font-weight: 700; color: var(--accent); margin-bottom: 0.4rem;">Шаг 2 · Тренировка</div>
+        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Тренажёры и генератор</h3>
+        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Решайте задания по темам, добавляйте задачи в избранное или создавайте случайные блиц-варианты.</p>
+        <a href="tests/" class="btn quiet btn-sm">Перейти к тестам →</a>
+      </div>
+      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
+        <div class="guide-step-badge" style="font-weight: 700; color: #ef4444; margin-bottom: 0.4rem;">Шаг 3 · Летучки на парах</div>
+        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Онлайн-контесты</h3>
+        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Быстрые работы на занятиях со встроенным таймером и автоматическим подсчётом баллов в рейтинг.</p>
+        <a href="contests/" class="btn quiet btn-sm">Участвовать в контестах →</a>
+      </div>
+      <div class="guide-step-card" style="background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 1.25rem;">
+        <div class="guide-step-badge" style="font-weight: 700; color: var(--ok); margin-bottom: 0.4rem;">Шаг 4 · Опросы</div>
+        <h3 style="margin: 0 0 0.4rem; font-size: 1.05rem;">Коллоквиумы (106 вопр.)</h3>
+        <p style="margin: 0 0 0.85rem; font-size: 0.88rem; color: var(--muted); line-height: 1.45;">Сборник определений Пермякова и Страдиной и интерактивный режим карточек Quizlet.</p>
+        <a href="colloquiums/" class="btn quiet btn-sm">Учить определения →</a>
+      </div>
+    </div>
+  </section>
+
   <!-- Two-Column Portal Layout -->
   <div class="portal-layout">
     <div class="portal-main-col">
@@ -684,6 +727,10 @@ ${navbarHtml("", "home", site)}
       </div>
 
       <div class="home-tab-panel active" data-panel="tests" id="tests">
+        <div class="home-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+          <span style="font-weight: 600; color: var(--muted); font-size: 0.9rem;">📋 Каталог тестов и генератор заданий</span>
+          <a href="tests/" class="btn primary btn-sm">Открыть раздел тренажёров и генератор →</a>
+        </div>
         ${testTopics.length > 1 ? `
         <div class="topic-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
           <button class="btn quiet btn-sm topic-filter-btn active" data-topic="all" type="button">Все темы</button>
@@ -773,6 +820,167 @@ ${authModalHtml(site)}
 </body>
 </html>
 `;
+}
+
+export function testsPage(tests = [], site = {}) {
+  const visible = tests.filter((t) => !t.meta?.hidden);
+  const testTopics = Array.from(new Set(visible.map((t) => t.meta?.topic).filter(Boolean)));
+  const totalTasks = tests.reduce((sum, t) => sum + t.count, 0);
+
+  const testItems = visible.map((t) => `
+    <article class="test-catalog-card" data-topic="${esc(t.meta?.topic || '')}" data-id="${esc(t.id)}">
+      <div class="test-card-top">
+        <span class="test-topic-badge">${esc(t.meta?.topic || 'Общее')}</span>
+        <span class="t-status test-status-badge" data-test-status="${esc(t.id)}">Не начат</span>
+      </div>
+      <h3 class="test-catalog-title"><a href="../${esc(t.id)}/">${esc(t.meta?.title || t.id)}</a></h3>
+      <p class="test-catalog-desc">${esc(t.meta?.description || `Проверочная работа по теме: ${t.meta?.topic || t.id}`)}</p>
+      <div class="test-catalog-footer">
+        <span class="test-tasks-count">📝 ${tasksWord(t.count)}</span>
+        <a href="../${esc(t.id)}/" class="btn primary btn-sm">Начать тест →</a>
+      </div>
+    </article>
+  `).join("");
+
+  return `${head("Тренажёры и генератор тестов — Дискретная математика", "../")}
+<body class="platform-body tests-catalog-body">
+  ${navbarHtml("../", "tests", site)}
+
+  <main class="platform-container">
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <h1 class="page-title">📋 Тренажёры и генератор тестов</h1>
+        <p class="page-subtitle">Практические задания по всем темам курса дискретной математики с мгновенной проверкой, разборами и генерацией случайных вариантов.</p>
+      </div>
+    </div>
+
+    <!-- Generator Banner Card -->
+    <div class="test-generator-card">
+      <div class="generator-header">
+        <div class="generator-icon">🎲</div>
+        <div>
+          <h2 class="generator-title">Генератор случайного теста</h2>
+          <p class="generator-desc">Сформируйте персональный проверочный вариант из общего пула (${totalTasks} заданий курса) для комплексной самопроверки перед коллоквиумом или экзаменом.</p>
+        </div>
+      </div>
+
+      <div class="generator-form">
+        <div class="generator-row">
+          <label class="generator-label">Количество заданий:</label>
+          <div class="generator-pills" id="gen-count-pills">
+            <button type="button" class="gen-pill" data-count="5">5 заданий</button>
+            <button type="button" class="gen-pill active" data-count="10">10 заданий</button>
+            <button type="button" class="gen-pill" data-count="15">15 заданий</button>
+            <button type="button" class="gen-pill" data-count="20">20 заданий</button>
+            <button type="button" class="gen-pill" data-count="30">30 заданий</button>
+          </div>
+        </div>
+
+        <div class="generator-row">
+          <label class="generator-label">Выбор темы:</label>
+          <select id="gen-topic-select" class="gen-select">
+            <option value="all">Все темы курса (Комплексный микс)</option>
+            ${testTopics.map((tp) => `<option value="${esc(tp)}">${esc(tp)}</option>`).join("")}
+          </select>
+        </div>
+
+        <div class="generator-row">
+          <label class="generator-label">Режим прохождения:</label>
+          <div class="generator-pills" id="gen-mode-pills">
+            <button type="button" class="gen-pill active" data-mode="exam">⏱️ Экзамен (проверка в конце)</button>
+            <button type="button" class="gen-pill" data-mode="practice">💡 Тренировка (с подсказками)</button>
+          </div>
+        </div>
+
+        <div class="generator-actions">
+          <button type="button" class="btn primary" id="btn-start-generator">
+            🚀 Сгенерировать и начать тест
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Topics Filter & Search -->
+    <div class="tests-toolbar" style="margin-top: 2.25rem;">
+      <div class="topic-filters" id="tests-topic-filters">
+        <button class="btn quiet btn-sm topic-filter-btn active" data-topic="all" type="button">Все темы (${visible.length})</button>
+        ${testTopics.map((tp) => `<button class="btn quiet btn-sm topic-filter-btn" data-topic="${esc(tp)}" type="button">${esc(tp)}</button>`).join("")}
+      </div>
+      <div class="tests-search-box">
+        <input type="search" id="tests-search" class="tests-search-input" placeholder="🔍 Поиск теста по названию...">
+      </div>
+    </div>
+
+    <!-- Tests Cards Grid -->
+    <div class="tests-catalog-grid" id="tests-catalog-grid">
+      ${testItems}
+    </div>
+
+    <!-- Bookmarks Section -->
+    <div class="favorites-section" id="favorites-section" style="margin-top: 3rem;" hidden>
+      <div class="section-title-wrap">
+        <h2 class="section-title">⭐ Мои избранные задания</h2>
+      </div>
+      <div id="favorites-list" class="favorites-grid"></div>
+    </div>
+  </main>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/tests-catalog.js"></script>
+</body>
+</html>`;
+}
+
+export function customTestPage(site = {}) {
+  return `${head("Сгенерированный тест — Дискретная математика", "../", "", true)}
+<body class="quiz platform-body custom-test-body">
+  ${navbarHtml("../", "tests", site)}
+  <header class="quiz-subtopbar">
+    <div class="quiz-subtopbar-inner">
+      <div class="quiz-subtopbar-left">
+        <a class="topbar-back" href="./" aria-label="К каталогу тестов">← Все тренажёры</a>
+        <span class="topbar-title" id="custom-test-title">🎲 Случайный вариант</span>
+      </div>
+      <div class="quiz-subtopbar-right">
+        <button class="topbar-count" id="map-open" type="button" aria-label="Карта заданий"><span id="count">0</span>&thinsp;/&thinsp;<span id="total">0</span></button>
+      </div>
+    </div>
+    <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
+  </header>
+
+  <div class="quiz-layout">
+    <main class="sheet">
+      <section class="intro">
+        <h1 id="custom-heading">🎲 Случайный проверочный тест</h1>
+        <div class="lead" id="custom-lead">Вариант сгенерирован из общего пула заданий курса дискретной математики.</div>
+        <p class="meta" id="custom-meta">Загрузка вопросов…</p>
+      </section>
+
+      <section class="result" id="result" hidden></section>
+      <div class="questions" id="custom-questions-wrap">
+        <p class="muted" style="text-align: center; padding: 2rem;">Формируем вопросы варианта…</p>
+      </div>
+
+      <section class="finish-section" id="finish-section" hidden>
+        <div class="finish-card">
+          <div class="finish-info">
+            <h2 style="margin: 0 0 0.35rem; font-size: 1.25rem;">Завершение работы</h2>
+            <p id="action-note" class="action-note" style="margin: 0; color: var(--muted); font-size: 0.9rem;">Нажмите для отправки на проверку и подсчёта баллов.</p>
+          </div>
+          <div id="actions" class="finish-actions">
+            <button class="btn primary" id="custom-submit-btn" type="button">Отправить на проверку</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/custom-test-runner.js"></script>
+</body>
+</html>`;
 }
 
 export function leaderboardPage(site = {}) {

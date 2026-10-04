@@ -918,6 +918,31 @@ test("Platform: student auth, profile, rating, leaderboard, and contest flow", a
   assert.strictEqual(sStop.json.contest.status, "finished");
 });
 
+test("tests catalog, custom test runner, and question pool are correctly generated", async () => {
+  const testsIndexFile = path.resolve("dist/tests/index.html");
+  const customTestFile = path.resolve("dist/tests/custom.html");
+  const poolFile = path.resolve("dist/pool.json");
+
+  assert.ok(fs.existsSync(testsIndexFile), "dist/tests/index.html must exist");
+  assert.ok(fs.existsSync(customTestFile), "dist/tests/custom.html must exist");
+  assert.ok(fs.existsSync(poolFile), "dist/pool.json must exist");
+
+  const catalogHtml = fs.readFileSync(testsIndexFile, "utf8");
+  assert.ok(catalogHtml.includes("tests-catalog-grid"), "Catalog page must contain tests catalog grid");
+  assert.ok(catalogHtml.includes("test-generator-card"), "Catalog page must contain generator card");
+  assert.ok(catalogHtml.includes("tests-catalog.js"), "Catalog page must include tests-catalog.js");
+
+  const customHtml = fs.readFileSync(customTestFile, "utf8");
+  assert.ok(customHtml.includes("custom-test-runner.js"), "Custom test page must include custom runner script");
+  assert.ok(customHtml.includes("custom-questions-wrap"), "Custom test page must have question container");
+
+  const pool = JSON.parse(fs.readFileSync(poolFile, "utf8"));
+  assert.ok(Array.isArray(pool), "dist/pool.json must be an array");
+  assert.ok(pool.length >= 350, `Pool must contain 350+ questions, got ${pool.length}`);
+  assert.ok(pool[0].testId && pool[0].id && pool[0].type, "Question must have testId, id, type");
+});
+
+
 
 
 

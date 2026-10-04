@@ -184,6 +184,7 @@ function initSchema(db) {
   }
 
   seedColloquiumsIfEmpty(db);
+  seedPlatformDemoData(db);
 }
 
 // ==========================================
@@ -665,6 +666,83 @@ export function seedColloquiumsIfEmpty(db) {
         console.warn("Failed to seed colloquium file:", f, e);
       }
     }
+  }
+}
+
+export function seedPlatformDemoData(db) {
+  try {
+    const studentCount = db.prepare("SELECT COUNT(*) as cnt FROM users WHERE role = 'student'").get()?.cnt || 0;
+    if (studentCount === 0) {
+      const demoStudents = [
+        { id: "usr_demo_1", email: "smirnov@itmo.ru", name: "Александр Смирнов", group_name: "M3101", rating: 480 },
+        { id: "usr_demo_2", email: "volkova@itmo.ru", name: "Екатерина Волкова", group_name: "M3102", rating: 445 },
+        { id: "usr_demo_3", email: "kuznetsov@itmo.ru", name: "Максим Кузнецов", group_name: "M3101", rating: 410 },
+        { id: "usr_demo_4", email: "novikova@itmo.ru", name: "Анна Новикова", group_name: "M3103", rating: 385 },
+        { id: "usr_demo_5", email: "morozov@itmo.ru", name: "Дмитрий Морозов", group_name: "M3102", rating: 350 },
+        { id: "usr_demo_6", email: "vasilieva@itmo.ru", name: "София Васильева", group_name: "M3101", rating: 320 },
+        { id: "usr_demo_7", email: "popov@itmo.ru", name: "Артем Попов", group_name: "M3103", rating: 295 },
+        { id: "usr_demo_8", email: "lebedeva@itmo.ru", name: "Полина Лебедева", group_name: "M3102", rating: 260 },
+      ];
+
+      const passHash = hashPassword("student123");
+      const now = new Date().toISOString();
+      const userStmt = db.prepare(`
+        INSERT OR REPLACE INTO users (id, email, password_hash, name, group_name, role, rating, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'student', ?, ?, ?)
+      `);
+
+      for (const s of demoStudents) {
+        userStmt.run(s.id, s.email, passHash, s.name, s.group_name, s.rating, now, now);
+      }
+
+      const attemptStmt = db.prepare(`
+        INSERT OR REPLACE INTO attempts (id, quiz_id, user_id, group_name, mode, answers, hints, score, max_score, feedback, duration_sec, created_at)
+        VALUES (?, ?, ?, ?, 'exam', '{}', '{}', ?, ?, '', ?, ?)
+      `);
+
+      const tests = ["01-graphs", "02-trees", "03-connectivity", "04-planarity"];
+      let attIdx = 1;
+      for (const s of demoStudents) {
+        const solvedCount = Math.min(tests.length, Math.floor(s.rating / 120) + 1);
+        for (let t = 0; t < solvedCount; t++) {
+          const testId = tests[t];
+          const score = Math.max(10, Math.floor(15 * (s.rating / 520) + (t % 2)));
+          const maxScore = 15;
+          const duration = 400 + Math.floor(Math.random() * 300);
+          attemptStmt.run(`att_demo_${attIdx++}`, testId, s.id, s.group_name, score, maxScore, duration, now);
+        }
+      }
+    }
+
+    const contestCount = db.prepare("SELECT COUNT(*) as cnt FROM contests").get()?.cnt || 0;
+    if (contestCount === 0) {
+      const now = Date.now();
+      const endsIn1Hour = new Date(now + 60 * 60 * 1000).toISOString();
+      const startsAt = new Date(now - 10 * 60 * 1000).toISOString();
+      const pastStarts = new Date(now - 3 * 24 * 3600 * 1000).toISOString();
+      const pastEnds = new Date(now - 3 * 24 * 3600 * 1000 + 20 * 60 * 1000).toISOString();
+
+      const contestStmt = db.prepare(`
+        INSERT OR REPLACE INTO contests (id, title, test_id, group_name, duration_minutes, starts_at, ends_at, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      contestStmt.run("cnt_active_1", "Летучка #1: Основы теории графов", "01-graphs", "all", 20, startsAt, endsIn1Hour, "active", startsAt);
+      contestStmt.run("cnt_past_1", "Мини-контест: Деревья и остовы", "02-trees", "all", 25, pastStarts, pastEnds, "finished", pastStarts);
+
+      const subStmt = db.prepare(`
+        INSERT OR REPLACE INTO contest_submissions (id, contest_id, user_id, user_name, group_name, score, max_score, percentage, duration_sec, answers, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+      `);
+
+      subStmt.run("csub_demo_1", "cnt_past_1", "usr_demo_1", "Александр Смирнов", "M3101", 15, 15, 100, 520, pastEnds);
+      subStmt.run("csub_demo_2", "cnt_past_1", "usr_demo_2", "Екатерина Волкова", "M3102", 14, 15, 93, 580, pastEnds);
+      subStmt.run("csub_demo_3", "cnt_past_1", "usr_demo_3", "Максим Кузнецов", "M3101", 13, 15, 87, 640, pastEnds);
+      subStmt.run("csub_demo_4", "cnt_past_1", "usr_demo_4", "Анна Новикова", "M3103", 12, 15, 80, 710, pastEnds);
+      subStmt.run("csub_demo_5", "cnt_past_1", "usr_demo_5", "Дмитрий Морозов", "M3102", 11, 15, 73, 850, pastEnds);
+    }
+  } catch (err) {
+    console.warn("Failed to seed platform demo data:", err);
   }
 }
 

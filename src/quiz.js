@@ -109,7 +109,7 @@ function applyValue(article, value) {
 
 function isDone(a) {
   const id = a.dataset.id;
-  return isAnswered(a.dataset.type, state.answers[id]) || Boolean(state.checked[id]);
+  return isAnswered(a.dataset.type, state.answers[id]);
 }
 
 function answeredCount() {
@@ -183,6 +183,38 @@ function next(article) {
   }
 }
 
+const favoritesKey = "trainer:favorites";
+function getFavorites() {
+  try { return JSON.parse(localStorage.getItem(favoritesKey)) || {}; } catch { return {}; }
+}
+function isFavorite(qId) {
+  const favs = getFavorites();
+  return Boolean(favs[`${testId}:${qId}`]);
+}
+function toggleFavorite(qId, btn, article) {
+  const favs = getFavorites();
+  const k = `${testId}:${qId}`;
+  if (favs[k]) {
+    delete favs[k];
+    btn.textContent = "⭐ В избранное";
+    btn.classList.remove("active");
+    btn.setAttribute("aria-pressed", "false");
+  } else {
+    const textSnippet = article.querySelector(".q-text")?.textContent?.trim().slice(0, 120) || "";
+    favs[k] = {
+      testId,
+      testTitle: document.querySelector(".topbar-title")?.textContent || testId,
+      qId,
+      textSnippet,
+      date: Date.now(),
+    };
+    btn.textContent = "★ В избранном";
+    btn.classList.add("active");
+    btn.setAttribute("aria-pressed", "true");
+  }
+  try { localStorage.setItem(favoritesKey, JSON.stringify(favs)); } catch {}
+}
+
 for (const a of articles) {
   const onAnswerChange = () => {
     resetConfirm();
@@ -195,8 +227,17 @@ for (const a of articles) {
   };
   a.addEventListener("input", onAnswerChange);
   a.addEventListener("change", onAnswerChange);
-  a.querySelector(".q-prev-btn")?.addEventListener("click", () => prev(a));
-  a.querySelector(".q-next-btn")?.addEventListener("click", () => next(a));
+  
+  const favBtn = a.querySelector(".favorite-btn");
+  if (favBtn) {
+    const qId = a.dataset.id;
+    const isFav = isFavorite(qId);
+    favBtn.textContent = isFav ? "★ В избранном" : "⭐ В избранное";
+    favBtn.classList.toggle("active", isFav);
+    favBtn.setAttribute("aria-pressed", String(isFav));
+    favBtn.addEventListener("click", () => toggleFavorite(qId, favBtn, a));
+  }
+
   a.querySelector(".flag-btn").addEventListener("click", () => {
     if (state.flags[a.dataset.id]) delete state.flags[a.dataset.id];
     else state.flags[a.dataset.id] = true;
@@ -268,10 +309,33 @@ function start() {
   if (groupInput && groupInput.value.trim()) {
     localStorage.setItem("trainer:group", groupInput.value.trim().toUpperCase());
   }
-  state.mode = document.querySelector('input[name="mode"]:checked').value;
-  state.startedAt = Date.now();
+  const chosenMode = document.querySelector('input[name="mode"]:checked')?.value || "exam";
+  
+  // Clean fresh start:
+  state = {
+    ...fresh(chosenMode),
+    startedAt: Date.now(),
+    mode: chosenMode,
+  };
+  confirming = false;
+  resuming = false;
+  $("to-skipped")?.remove();
+  setNote("");
+
+  for (const a of articles) {
+    applyValue(a, null);
+    a.classList.remove("is-answered", "answered", "is-right", "is-wrong", "locked", "q-pulse-highlight");
+    const r = a.querySelector(".review");
+    if (r) { r.hidden = true; r.replaceChildren(); }
+    showHints(a, 0);
+  }
+  if ($("result")) $("result").hidden = true;
+  body.classList.add("started");
+
   persist();
+  applyScope();
   applyMode();
+  updateProgress();
   articles[0]?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -514,6 +578,37 @@ function remember() {
     const h = JSON.parse(localStorage.getItem(k)) || [];
     h.push({ score: state.result.score, max: state.result.max, at: Date.now() });
     localStorage.setItem(k, JSON.stringify(h.slice(-20)));
+  } catch {}
+
+  // Track weak spots and solving time
+  try {
+    const dur = Math.max(0, Math.round((state.finishedAt - (state.startedAt || state.finishedAt)) / 1000));
+    const totalSec = Number(localStorage.getItem("trainer:total_solving_sec") || 0) + dur;
+    localStorage.setItem("trainer:total_solving_sec", totalSec);
+
+    const weakStoreKey = "trainer:weak_questions";
+    const weak = JSON.parse(localStorage.getItem(weakStoreKey)) || {};
+    const testTitle = document.querySelector(".topbar-title")?.textContent?.trim() || testId;
+
+    for (const a of active()) {
+      const qId = a.dataset.id;
+      const isOk = Boolean(state.result?.results?.[qId]);
+      const keyId = `${testId}:${qId}`;
+      if (!isOk) {
+        const textSnippet = a.querySelector(".q-text")?.textContent?.trim().slice(0, 140) || "";
+        weak[keyId] = {
+          testId,
+          testTitle,
+          qId,
+          textSnippet,
+          lastFailedAt: Date.now(),
+          failCount: (weak[keyId]?.failCount || 0) + 1,
+        };
+      } else {
+        delete weak[keyId];
+      }
+    }
+    localStorage.setItem(weakStoreKey, JSON.stringify(weak));
   } catch {}
 }
 
@@ -869,14 +964,27 @@ if (feedback) {
 
 // ---------- восстановление ----------
 
+if (state.startedAt) {
+  body.classList.add("started");
+}
+
 for (const a of articles) {
   applyValue(a, state.answers[a.dataset.id]);
   showHints(a, state.hints[a.dataset.id] || 0);
+  a.classList.toggle("is-answered", isDone(a));
 }
 applyScope();
 applyMode();
 updateProgress();
-offerResume();
+
+if (state.startedAt && !state.finished && answeredCount() > 0) {
+  const toast = document.createElement("div");
+  toast.className = "restore-toast";
+  toast.textContent = "💾 Сессия восстановлена. Ваши ответы сохранены.";
+  document.body.appendChild(toast);
+  setTimeout(() => toast.classList.add("show"), 50);
+  setTimeout(() => { toast.classList.remove("show"); setTimeout(() => toast.remove(), 400); }, 3500);
+}
 
 if (state.finished || Object.keys(state.checked).length) {
   loadKey().then((key) => {

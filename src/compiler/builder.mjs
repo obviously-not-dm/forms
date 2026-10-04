@@ -18,6 +18,8 @@ import {
   profilePage,
   contestsPage,
   contestRoomPage,
+  testsPage,
+  customTestPage,
 } from "./templates.mjs";
 import { syncFromDisk, getAllNotes, getAllTests, getAllColloquiumQuestions } from "../server/db.mjs";
 
@@ -610,6 +612,30 @@ export function build() {
   fs.mkdirSync(cntOut, { recursive: true });
   fs.writeFileSync(path.join(cntOut, "index.html"), contestsPage(site));
   fs.writeFileSync(path.join(cntOut, "room.html"), contestRoomPage(site));
+
+  // Build tests catalog & custom test runner
+  const testsOut = path.join(DIST, "tests");
+  fs.mkdirSync(testsOut, { recursive: true });
+  fs.writeFileSync(path.join(testsOut, "index.html"), testsPage(tests, site));
+  fs.writeFileSync(path.join(testsOut, "custom.html"), customTestPage(site));
+
+  // Build global questions pool for random generator
+  const allQuestionsPool = tests.filter((t) => !t.meta.hidden).flatMap((t) =>
+    (t.sections || []).flatMap((s) => (s.questions || []).map((q) => ({
+      testId: t.id,
+      testTitle: t.meta.title || t.id,
+      topic: t.meta.topic || "Общее",
+      section: s.title || "",
+      id: q.id,
+      n: q.n,
+      type: q.type,
+      html: q.html,
+      options: q.options || [],
+      hintsHtml: q.hintsHtml || [],
+      key: q.key || null,
+    })))
+  );
+  fs.writeFileSync(path.join(DIST, "pool.json"), JSON.stringify(allQuestionsPool));
 
   // Build admin & home
   const visibleColloquiumsCount = renderedColloquiums.filter((c) => !c.hidden).length;

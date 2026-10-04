@@ -222,9 +222,20 @@ textarea { resize: vertical; }
 .mode-desc { color: var(--muted); font-size: 0.88rem; line-height: 1.4; }
 .start .btn.primary { justify-self: start; padding: 0.85rem 2.2rem; font-size: 1.02rem; }
 
-/* вопросы всегда доступны для решения */
-body.quiz:not(.started) .questions { opacity: 1; pointer-events: auto; }
-body.quiz:not(.started) .feedback { opacity: 0.85; }
+/* До нажатия кнопки «Начать тестирование» вопросы и сайдбар скрыты */
+body.quiz:not(.started) .questions,
+body.quiz:not(.started) .quiz-sidebar,
+body.quiz:not(.started) .mode-bar,
+body.quiz:not(.started) .finish-section,
+body.quiz:not(.started) .feedback,
+body.quiz:not(.started) .quiz-subtopbar .topbar-count,
+body.quiz:not(.started) .quiz-subtopbar .progress {
+  display: none !important;
+}
+
+body.quiz.started #start {
+  display: none !important;
+}
 
 /* ---------- задание ---------- */
 
@@ -5442,6 +5453,352 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
     padding: 0.25rem 0.65rem;
     font-size: 1.05rem;
   }
+}
+
+/* ---------- 7. Pretest Modal Card & Favorites ---------- */
+
+.pretest-modal-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 2.2rem 2.5rem;
+  box-shadow: var(--shadow-lg);
+  max-width: 36rem;
+  margin: 1.5rem auto 3rem;
+}
+
+.pretest-badge {
+  display: inline-block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.favorite-btn {
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.favorite-btn:hover {
+  color: #f59e0b;
+}
+
+.favorite-btn.active, .favorite-btn[aria-pressed="true"] {
+  color: #d97706;
+  background: #fef3c7;
+  border-color: #fde68a;
+  font-weight: 600;
+}
+
+.restore-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  font-size: 0.9rem;
+  font-weight: 600;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.restore-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---------- 8. Каталог тренажёров и Генератор тестов ---------- */
+
+.test-generator-card {
+  background: linear-gradient(135deg, var(--card) 0%, var(--accent-soft) 100%);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: var(--radius-lg);
+  padding: 1.75rem 2rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 2rem;
+}
+
+.generator-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.generator-icon {
+  font-size: 2.2rem;
+  line-height: 1;
+}
+
+.generator-title {
+  margin: 0 0 0.35rem 0;
+  font-size: 1.35rem;
+}
+
+.generator-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  max-width: 52rem;
+}
+
+.generator-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.generator-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.generator-label {
+  font-weight: 600;
+  font-size: 0.88rem;
+  min-width: 170px;
+  color: var(--ink);
+}
+
+.generator-pills {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.gen-pill {
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.gen-pill:hover {
+  border-color: var(--line-strong);
+}
+
+.gen-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.gen-select {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  min-width: 280px;
+}
+
+.tests-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.tests-search-input {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  min-width: 240px;
+}
+
+.tests-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+.test-catalog-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  box-shadow: var(--shadow);
+}
+
+.test-catalog-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--line-strong);
+}
+
+.test-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.65rem;
+}
+
+.test-topic-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--muted);
+}
+
+.test-status-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--muted);
+}
+
+.test-status-badge.in-progress {
+  background: rgba(234, 179, 8, 0.15);
+  color: #b45309;
+}
+
+.test-status-badge.done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.test-status-badge.attempted {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.test-catalog-title {
+  margin: 0 0 0.45rem 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.test-catalog-title a {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.test-catalog-title a:hover {
+  color: var(--accent);
+}
+
+.test-catalog-desc {
+  margin: 0 0 1rem 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.45;
+  flex: 1;
+}
+
+.test-catalog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.test-tasks-count {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Favorites Grid */
+.favorites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.favorite-item-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.15rem;
+}
+
+.favorite-item-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.45rem;
+}
+
+.favorite-q-badge {
+  color: #d97706;
+}
+
+.favorite-snippet {
+  margin: 0 0 0.85rem 0;
+  font-size: 0.88rem;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+/* Weak Spots Problem Areas in Profile */
+.problem-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--bad);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.problem-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.problem-card-q {
+  font-size: 0.92rem;
+  margin-bottom: 0.5rem;
+  color: var(--ink);
+}
+
+.problem-card-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 
