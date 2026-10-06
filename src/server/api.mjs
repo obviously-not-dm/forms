@@ -38,7 +38,22 @@ import {
   saveContestSubmission,
   getContestSubmissions,
   getUserContestSubmission,
+  getAllPractices,
+  getPracticeById,
+  savePractice,
+  deletePractice,
+  getAllHomeworks,
+  getHomeworkById,
+  saveHomework,
+  deleteHomework,
+  saveHomeworkSubmission,
+  getHomeworkSubmission,
+  getHomeworkSubmissionById,
+  getHomeworkSubmissions,
+  getAllHomeworkSubmissions,
+  reviewHomeworkSubmission,
 } from "./db.mjs";
+import { saveUploadedPdf, getPdfFilePath, isValidPdf } from "./storage.mjs";
 import { serializeTest, parseTest, serializeNote, parseNote, build } from "../compiler/builder.mjs";
 import { grade } from "../grade.js";
 
@@ -158,6 +173,50 @@ export function readBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+export function readRawBuffer(req, maxBytes = 26 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        req.destroy();
+        reject(new Error("Превышен максимальный размер файла (25 МБ)"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+export function parseMultipartPdf(buffer, boundary) {
+  const boundaryBuffer = Buffer.from(`--${boundary}`);
+  let start = buffer.indexOf(boundaryBuffer);
+  if (start === -1) return null;
+
+  while (start !== -1) {
+    const nextStart = buffer.indexOf(boundaryBuffer, start + boundaryBuffer.length);
+    const part = nextStart === -1 ? buffer.subarray(start) : buffer.subarray(start, nextStart);
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd !== -1) {
+      const headerStr = part.subarray(0, headerEnd).toString("utf8");
+      if (headerStr.includes('filename="') || headerStr.includes("filename*=")) {
+        const match = headerStr.match(/filename=["']?([^"';\r\n]+)["']?/i);
+        let filename = match ? match[1] : "solution.pdf";
+        let fileContent = part.subarray(headerEnd + 4);
+        if (fileContent.length >= 2 && fileContent.subarray(fileContent.length - 2).toString() === "\r\n") {
+          fileContent = fileContent.subarray(0, fileContent.length - 2);
+        }
+        return { filename, buffer: fileContent };
+      }
+    }
+    start = nextStart;
+  }
+  return null;
 }
 
 async function handleSaveTest(res, testId, body) {
@@ -921,6 +980,260 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
         test_title: test?.title || contest.test_id,
         count,
       });
+    }
+
+    // ----------------------------------------------------
+    // PRACTICES API
+    // ----------------------------------------------------
+    const parsedUrl = new URL(req.url, "http://localhost");
+    const groupParam = parsedUrl.searchParams.get("group") || parsedUrl.searchParams.get("group_name");
+
+    if (normPath === "/api/practices" && method === "GET") {
+      const sess = getSession(req);
+      const isTeacher = sess?.role === "admin" || sess?.role === "teacher";
+      const studentGroup = sess?.userObj?.group_name;
+      const targetGroup = groupParam || (!isTeacher ? studentGroup : null);
+      const includeUnpublished = isTeacher && parsedUrl.searchParams.get("all") === "1";
+
+      const practices = getAllPractices({ group: targetGroup, includeUnpublished: isTeacher });
+      return sendJson(res, 200, { practices });
+    }
+
+    const practiceItemMatch = normPath.match(/^\/api\/practices\/([^/?#]+)$/);
+    if (practiceItemMatch && method === "GET") {
+      const practiceId = decodeURIComponent(practiceItemMatch[1]).trim();
+      const practice = getPracticeById(practiceId);
+      if (!practice) return sendJson(res, 404, { error: "Практика не найдена" });
+      return sendJson(res, 200, { practice });
+    }
+
+    if (normPath === "/api/admin/practices" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может создавать практики" });
+      }
+      const body = await readBody(req);
+      const saved = savePractice(body);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, practice: saved });
+    }
+
+    const practiceAdminItemMatch = normPath.match(/^\/api\/admin\/practices\/([^/?#]+)$/);
+    if (practiceAdminItemMatch && method === "PUT") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может редактировать практики" });
+      }
+      const practiceId = decodeURIComponent(practiceAdminItemMatch[1]).trim();
+      const body = await readBody(req);
+      const saved = savePractice({ id: practiceId, ...body });
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, practice: saved });
+    }
+
+    if (practiceAdminItemMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может удалять практики" });
+      }
+      const practiceId = decodeURIComponent(practiceAdminItemMatch[1]).trim();
+      deletePractice(practiceId);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // ----------------------------------------------------
+    // HOMEWORKS API
+    // ----------------------------------------------------
+    if (normPath === "/api/homeworks" && method === "GET") {
+      const sess = getSession(req);
+      const isTeacher = sess?.role === "admin" || sess?.role === "teacher";
+      const studentGroup = sess?.userObj?.group_name;
+      const targetGroup = groupParam || (!isTeacher ? studentGroup : null);
+      const userId = sess?.userId || sess?.userObj?.id || null;
+
+      const homeworks = getAllHomeworks({ group: targetGroup, includeUnpublished: isTeacher, userId });
+      return sendJson(res, 200, { homeworks });
+    }
+
+    const homeworkItemMatch = normPath.match(/^\/api\/homeworks\/([^/?#]+)$/);
+    if (homeworkItemMatch && method === "GET") {
+      const hwId = decodeURIComponent(homeworkItemMatch[1]).trim();
+      const sess = getSession(req);
+      const userId = sess?.userId || sess?.userObj?.id || null;
+      const homework = getHomeworkById(hwId, userId);
+      if (!homework) return sendJson(res, 404, { error: "Домашнее задание не найдено" });
+      return sendJson(res, 200, { homework });
+    }
+
+    if (normPath === "/api/admin/homeworks" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может создавать домашние задания" });
+      }
+      const body = await readBody(req);
+      const saved = saveHomework(body);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, homework: saved });
+    }
+
+    const homeworkAdminItemMatch = normPath.match(/^\/api\/admin\/homeworks\/([^/?#]+)$/);
+    if (homeworkAdminItemMatch && method === "PUT") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может редактировать домашние задания" });
+      }
+      const hwId = decodeURIComponent(homeworkAdminItemMatch[1]).trim();
+      const body = await readBody(req);
+      const saved = saveHomework({ id: hwId, ...body });
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, homework: saved });
+    }
+
+    if (homeworkAdminItemMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может удалять домашние задания" });
+      }
+      const hwId = decodeURIComponent(homeworkAdminItemMatch[1]).trim();
+      deleteHomework(hwId);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // ----------------------------------------------------
+    // HOMEWORK SUBMISSIONS & PDF UPLOAD
+    // ----------------------------------------------------
+    const hwSubmitMatch = normPath.match(/^\/api\/homeworks\/([^/?#]+)\/submit$/);
+    if (hwSubmitMatch && method === "POST") {
+      const sess = getSession(req);
+      if (!sess) {
+        return sendJson(res, 401, { error: "Пожалуйста, войдите в систему для отправки домашнего задания" });
+      }
+
+      const hwId = decodeURIComponent(hwSubmitMatch[1]).trim();
+      const hw = getHomeworkById(hwId);
+      if (!hw) {
+        return sendJson(res, 404, { error: "Домашнее задание не найдено" });
+      }
+
+      let pdfBuffer = null;
+      let originalFilename = "solution.pdf";
+      const ctype = String(req.headers["content-type"] || "");
+
+      if (ctype.includes("multipart/form-data")) {
+        const boundaryMatch = ctype.match(/boundary=([^;]+)/i);
+        if (!boundaryMatch) {
+          return sendJson(res, 400, { error: "Неверный multipart/form-data запрос: отсутствует boundary" });
+        }
+        const boundary = boundaryMatch[1].trim();
+        const rawBuf = await readRawBuffer(req);
+        const parsed = parseMultipartPdf(rawBuf, boundary);
+        if (!parsed || !parsed.buffer) {
+          return sendJson(res, 400, { error: "В запросе не найден файл PDF" });
+        }
+        pdfBuffer = parsed.buffer;
+        originalFilename = parsed.filename;
+      } else if (ctype.includes("application/pdf") || ctype.includes("application/octet-stream")) {
+        pdfBuffer = await readRawBuffer(req);
+        if (req.headers["x-filename"]) {
+          try {
+            originalFilename = decodeURIComponent(req.headers["x-filename"]);
+          } catch {
+            originalFilename = req.headers["x-filename"];
+          }
+        }
+      } else {
+        const body = await readBody(req);
+        if (body.fileData) {
+          const base64Data = String(body.fileData).replace(/^data:application\/pdf;base64,/, "");
+          pdfBuffer = Buffer.from(base64Data, "base64");
+          if (body.fileName) originalFilename = body.fileName;
+        } else {
+          return sendJson(res, 400, { error: "Ожидался PDF файл (multipart/form-data или application/pdf)" });
+        }
+      }
+
+      if (!pdfBuffer || !isValidPdf(pdfBuffer)) {
+        return sendJson(res, 400, { error: "Загруженный файл не является корректным PDF-документом" });
+      }
+
+      const uploadResult = await saveUploadedPdf(originalFilename, pdfBuffer);
+
+      const userId = sess.userId || sess.userObj?.id || sess.user;
+      const userName = sess.userObj?.name || sess.user || "Студент";
+      const groupName = sess.userObj?.group_name || "";
+
+      const submission = saveHomeworkSubmission({
+        homework_id: hwId,
+        user_id: userId,
+        user_name: userName,
+        group_name: groupName,
+        file_name: uploadResult.originalName,
+        file_path: uploadResult.filename,
+        file_size: uploadResult.size,
+      });
+
+      return sendJson(res, 200, { ok: true, submission });
+    }
+
+    const hwOwnSubMatch = normPath.match(/^\/api\/homeworks\/([^/?#]+)\/submission$/);
+    if (hwOwnSubMatch && method === "GET") {
+      const sess = getSession(req);
+      if (!sess) return sendJson(res, 401, { error: "Необходима авторизация" });
+      const hwId = decodeURIComponent(hwOwnSubMatch[1]).trim();
+      const userId = sess.userId || sess.userObj?.id;
+      const submission = getHomeworkSubmission(hwId, userId);
+      return sendJson(res, 200, { submission });
+    }
+
+    const hwAdminSubsMatch = normPath.match(/^\/api\/admin\/homeworks\/([^/?#]+)\/submissions$/);
+    if (hwAdminSubsMatch && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может просматривать сданные работы" });
+      }
+      const hwId = decodeURIComponent(hwAdminSubsMatch[1]).trim();
+      const submissions = getHomeworkSubmissions(hwId, { group_name: groupParam });
+      return sendJson(res, 200, { submissions });
+    }
+
+    const hwReviewMatch = normPath.match(/^\/api\/admin\/homeworks\/submissions\/([^/?#]+)\/review$/);
+    if (hwReviewMatch && method === "PUT") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может проверять работы" });
+      }
+      const subId = decodeURIComponent(hwReviewMatch[1]).trim();
+      const body = await readBody(req);
+      const reviewed = reviewHomeworkSubmission(subId, body);
+      return sendJson(res, 200, { ok: true, submission: reviewed });
+    }
+
+    // ----------------------------------------------------
+    // PDF UPLOADS SERVING
+    // ----------------------------------------------------
+    const uploadFileMatch = normPath.match(/^\/api\/uploads\/homeworks\/([^/?#]+)$/);
+    if (uploadFileMatch && method === "GET") {
+      const filename = decodeURIComponent(uploadFileMatch[1]).trim();
+      const filePath = getPdfFilePath(filename);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return sendJson(res, 404, { error: "PDF файл не найден" });
+      }
+
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": stat.size,
+        "Content-Disposition": `inline; filename="${encodeURIComponent(path.basename(filePath))}"`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      if (typeof res.on === "function" && typeof res.emit === "function") {
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        res.end(fs.readFileSync(filePath));
+      }
+      return;
     }
 
     return sendJson(res, 404, { error: "API endpoint не найден" });

@@ -183,6 +183,59 @@ function initSchema(db) {
     db.exec("ALTER TABLE colloquiums ADD COLUMN hidden INTEGER DEFAULT 0;");
   }
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS practices (
+      id TEXT PRIMARY KEY,
+      order_index INTEGER DEFAULT 0,
+      topic TEXT,
+      title TEXT,
+      group_name TEXT DEFAULT 'all',
+      is_published INTEGER DEFAULT 1,
+      content TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_practices_order ON practices(order_index);
+    CREATE INDEX IF NOT EXISTS idx_practices_group ON practices(group_name);
+    CREATE INDEX IF NOT EXISTS idx_practices_published ON practices(is_published);
+
+    CREATE TABLE IF NOT EXISTS homeworks (
+      id TEXT PRIMARY KEY,
+      order_index INTEGER DEFAULT 0,
+      topic TEXT,
+      title TEXT,
+      group_name TEXT DEFAULT 'all',
+      deadline TEXT,
+      max_score REAL DEFAULT 10,
+      is_published INTEGER DEFAULT 1,
+      content TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_homeworks_order ON homeworks(order_index);
+    CREATE INDEX IF NOT EXISTS idx_homeworks_group ON homeworks(group_name);
+    CREATE INDEX IF NOT EXISTS idx_homeworks_published ON homeworks(is_published);
+
+    CREATE TABLE IF NOT EXISTS homework_submissions (
+      id TEXT PRIMARY KEY,
+      homework_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      group_name TEXT,
+      file_name TEXT,
+      file_path TEXT,
+      file_size INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      score REAL DEFAULT 0,
+      teacher_comment TEXT DEFAULT '',
+      submitted_at TEXT,
+      reviewed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_hw_subs_hw ON homework_submissions(homework_id);
+    CREATE INDEX IF NOT EXISTS idx_hw_subs_user ON homework_submissions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_hw_subs_status ON homework_submissions(status);
+  `);
+
   seedColloquiumsIfEmpty(db);
   seedPlatformDemoData(db);
 }
@@ -740,6 +793,232 @@ export function seedPlatformDemoData(db) {
       subStmt.run("csub_demo_3", "cnt_past_1", "usr_demo_3", "Максим Кузнецов", "M3101", 13, 15, 87, 640, pastEnds);
       subStmt.run("csub_demo_4", "cnt_past_1", "usr_demo_4", "Анна Новикова", "M3103", 12, 15, 80, 710, pastEnds);
       subStmt.run("csub_demo_5", "cnt_past_1", "usr_demo_5", "Дмитрий Морозов", "M3102", 11, 15, 73, 850, pastEnds);
+    }
+
+    const practiceCount = db.prepare("SELECT COUNT(*) as cnt FROM practices").get()?.cnt || 0;
+    if (practiceCount === 0) {
+      const now = new Date().toISOString();
+      const pStmt = db.prepare(`
+        INSERT OR REPLACE INTO practices (id, order_index, topic, title, group_name, is_published, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      pStmt.run(
+        "practice-1-relations",
+        1,
+        "Отношения",
+        "Практика 1: Бинарные отношения и фактор-множества",
+        "all",
+        1,
+        `# Практика 1: Бинарные отношения и фактор-множества
+
+## 🎯 Цели занятия
+1. Закрепить понятия бинарного отношения: область определения $\\mathrm{dom}(R)$ и область значений $\\mathrm{im}(R)$.
+2. Научиться проверять свойства отношений: рефлексивность, антирефлексивность, симметричность, антисимметричность, транзитивность.
+3. Исследовать отношения эквивалентности и строить классы эквивалентности $[a]_\\sim$.
+
+---
+
+## 📌 Краткая теоретическая справка
+Пусть $A$ — непустое множество. Бинарным отношением на $A$ называется любое подмножество $R \\subseteq A \\times A$.
+- **Рефлексивность**: $\\forall x \\in A : (x, x) \\in R$.
+- **Симметричность**: $\\forall x, y \\in A : (x, y) \\in R \\implies (y, x) \\in R$.
+- **Антисимметричность**: $\\forall x, y \\in A : ((x, y) \\in R \\land (y, x) \\in R) \\implies x = y$.
+- **Транзитивность**: $\\forall x, y, z \\in A : ((x, y) \\in R \\land (y, z) \\in R) \\implies (x, z) \\in R$.
+
+Отношение называется **отношением эквивалентности**, если оно рефлексивно, симметрично и транзитивно.
+
+---
+
+## 📝 Задачи для решения на паре
+
+### Задача 1. Исследование свойств отношений
+На множестве целых чисел $\\mathbb{Z}$ задано отношение $R$:
+$$(x, y) \\in R \\iff x - y \\text{ делится на } 5$$
+1. Докажите, что $R$ является отношением эквивалентности.
+2. Опишите все классы эквивалентности $[0], [1], [2], [3], [4]$.
+3. Сколько элементов содержит фактор-множество $\\mathbb{Z} / R$?
+
+### Задача 2. Композиция отношений
+Пусть $R, S \\subseteq A \\times A$. 
+Докажите или опровергните:
+1. Если $R$ и $S$ симметричны, то $R \\circ S$ симметрично тогда и только тогда, когда $R \\circ S = S \\circ R$.
+2. Если $R$ транзитивно, то $R^2 \\subseteq R$.
+
+### Задача 3. Число отношений
+Пусть $|A| = n$. Найдите:
+- Общее количество бинарных отношений на $A$.
+- Количество рефлексивных отношений на $A$.
+- Количество симметричных отношений на $A$.
+- Количество отношений, одновременно рефлексивных и симметричных.
+`,
+        now,
+        now
+      );
+
+      pStmt.run(
+        "practice-2-boolean",
+        2,
+        "Булевы функции",
+        "Практика 2: Булевы функции, СДНФ, СКНФ и полнота",
+        "all",
+        1,
+        `# Практика 2: Булевы функции, СДНФ, СКНФ и полнота
+
+## 🎯 Цели занятия
+1. Построение таблиц истинности и совершенных нормальных форм (СДНФ, СКНФ).
+2. Минимизация булевых формул и полином Жегалкина.
+3. Проверка функциональной полноты систем булевых функций по критерию Поста.
+
+---
+
+## 📌 Краткая теоретическая справка
+Булева функция $f: \\{0, 1\\}^n \\to \\{0, 1\\}$.
+Замкнутые классы Поста:
+- $T_0$ — сохраняющие ноль: $f(0, \\dots, 0) = 0$.
+- $T_1$ — сохраняющие единицу: $f(1, \\dots, 1) = 1$.
+- $S$ — самодвойственные: $f(\\neg x_1, \\dots, \\neg x_n) = \\neg f(x_1, \\dots, x_n)$.
+- $M$ — монотонные: $\\alpha \\le \\beta \\implies f(\\alpha) \\le f(\\beta)$.
+- $L$ — линейные: $f(x_1, \\dots, x_n) = a_0 \\oplus a_1 x_1 \\oplus \\dots \\oplus a_n x_n$.
+
+Система функций $K$ полна $\\iff K \\not\\subseteq T_0, K \\not\\subseteq T_1, K \\not\\subseteq S, K \\not\\subseteq M, K \\not\\subseteq L$.
+
+---
+
+## 📝 Задачи для решения на паре
+
+### Задача 1. Построение СДНФ и полинома Жегалкина
+Для функции большинства $Maj(x, y, z) = (x \\land y) \\lor (y \\land z) \\lor (x \\land z)$:
+1. Постройте таблицу истинности.
+2. Запишите совершенную дизъюнктивную нормальную форму (СДНФ).
+3. Постройте полином Жегалкина.
+
+### Задача 2. Критерий Поста
+Исследуйте на полноту систему функций:
+$$K = \\{ x \\oplus y \\oplus z, \\; x \\to y, \\; 1 \\}$$
+`,
+        now,
+        now
+      );
+
+      pStmt.run(
+        "practice-3-graphs",
+        3,
+        "Графы",
+        "Практика 3: Деревья, циклы и алгоритмы остовов",
+        "M3101",
+        1,
+        `# Практика 3: Деревья, циклы и алгоритмы остовов
+
+## 🎯 Цели занятия
+1. Свойства деревьев и эквивалентные определения дерева.
+2. Алгоритмы поиска минимального остовного дерева (Краскал, Прим).
+
+---
+
+## 📝 Задачи для решения на паре
+
+### Задача 1. Свойства деревьев
+Докажите, что связный граф $G = (V, E)$ является деревом тогда и только тогда, когда $|E| = |V| - 1$.
+`,
+        now,
+        now
+      );
+    }
+
+    const homeworkCount = db.prepare("SELECT COUNT(*) as cnt FROM homeworks").get()?.cnt || 0;
+    if (homeworkCount === 0) {
+      const now = new Date().toISOString();
+      const inTwoWeeks = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+      const inThreeWeeks = new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+
+      const hwStmt = db.prepare(`
+        INSERT OR REPLACE INTO homeworks (id, order_index, topic, title, group_name, deadline, max_score, is_published, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      hwStmt.run(
+        "hw-1-relations",
+        1,
+        "Отношения",
+        "ДЗ 1: Отношения эквивалентности и фактор-множества",
+        "all",
+        inTwoWeeks,
+        10,
+        1,
+        `# Домашнее задание №1: Отношения эквивалентности
+
+### 📋 Задачи
+1. **Задача 1 (3 балла):** Доказать, что отношение $x \\sim y \\iff x - y \\in \\mathbb{Z}$ является отношением эквивалентности на $\\mathbb{R}$. Описать фактор-множество $\\mathbb{R} / \\sim$.
+2. **Задача 2 (3 балла):** Найти количество различных отношений эквивалентности на 4-элементном множестве (число Белла $B_4$).
+3. **Задача 3 (4 балла):** Пусть $P = (X, \\le)$ — конечное частично упорядоченное множество. Докажите существование минимального элемента.
+
+---
+
+### ⚠️ Требования к оформлению и сдаче:
+- Решение оформляется в рукописном или электронном виде.
+- Загрузка **строго в формате PDF** (размер до 25 МБ).
+- На титульном листе обязательно укажите ФИО и группу.
+`,
+        now,
+        now
+      );
+
+      hwStmt.run(
+        "hw-2-boolean",
+        2,
+        "Булевы функции",
+        "ДЗ 2: Замкнутые классы Поста",
+        "all",
+        inThreeWeeks,
+        10,
+        1,
+        `# Домашнее задание №2: Замкнутые классы Поста
+
+### 📋 Задачи
+1. **Задача 1 (4 балла):** Разложить функцию $f(x, y, z) = (x \\leftrightarrow y) \\oplus z$ в полином Жегалкина. Определить её принадлежность классам $T_0, T_1, S, M, L$.
+2. **Задача 2 (6 баллов):** Выяснить, является ли функционально полной система функций $\\{ x \\downarrow y, \\; 1 \\}$.
+`,
+        now,
+        now
+      );
+
+      const subStmt = db.prepare(`
+        INSERT OR REPLACE INTO homework_submissions (id, homework_id, user_id, user_name, group_name, file_name, file_path, file_size, status, score, teacher_comment, submitted_at, reviewed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      subStmt.run(
+        "sub_demo_1",
+        "hw-1-relations",
+        "usr_demo_1",
+        "Александр Смирнов",
+        "M3101",
+        "smirnov_m3101_hw1.pdf",
+        "demo_smirnov_m3101_hw1.pdf",
+        142850,
+        "passed",
+        10,
+        "Отличное и строгое решение всех трёх задач! Фактор-множество описано корректно.",
+        now,
+        now
+      );
+
+      subStmt.run(
+        "sub_demo_2",
+        "hw-1-relations",
+        "usr_demo_2",
+        "Екатерина Волкова",
+        "M3102",
+        "volkova_m3102_hw1.pdf",
+        "demo_volkova_m3102_hw1.pdf",
+        185420,
+        "pending",
+        0,
+        "",
+        now,
+        null
+      );
     }
   } catch (err) {
     console.warn("Failed to seed platform demo data:", err);
@@ -1300,4 +1579,318 @@ export function getUserContestSubmission(contest_id, user_id) {
     answers: row.answers ? (typeof row.answers === "string" ? JSON.parse(row.answers) : row.answers) : {},
   };
 }
+
+// ==========================================
+// PRACTICES REPOSITORY
+// ==========================================
+
+export function getAllPractices({ group = null, includeUnpublished = false } = {}) {
+  const db = getDb();
+  let query = "SELECT * FROM practices";
+  const conditions = [];
+  const params = [];
+
+  if (!includeUnpublished) {
+    conditions.push("is_published = 1");
+  }
+
+  if (group && group !== "all") {
+    conditions.push("(group_name = 'all' OR group_name = ?)");
+    params.push(group);
+  }
+
+  if (conditions.length > 0) {
+    query += " WHERE " + conditions.join(" AND ");
+  }
+
+  query += " ORDER BY order_index ASC, id ASC";
+  const rows = db.prepare(query).all(...params);
+
+  return rows.map((r) => ({
+    id: r.id,
+    order: r.order_index,
+    order_index: r.order_index,
+    topic: r.topic || "Общее",
+    title: r.title || r.id,
+    group_name: r.group_name || "all",
+    is_published: Boolean(r.is_published),
+    content: r.content || "",
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  }));
+}
+
+export function getPracticeById(id) {
+  const db = getDb();
+  const r = db.prepare("SELECT * FROM practices WHERE id = ?").get(id);
+  if (!r) return null;
+  return {
+    id: r.id,
+    order: r.order_index,
+    order_index: r.order_index,
+    topic: r.topic || "Общее",
+    title: r.title || r.id,
+    group_name: r.group_name || "all",
+    is_published: Boolean(r.is_published),
+    content: r.content || "",
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+export function savePractice({
+  id,
+  title,
+  topic = "Общее",
+  order_index = 0,
+  group_name = "all",
+  is_published = 1,
+  content = "",
+}) {
+  const db = getDb();
+  const safeId = id ? String(id).trim() : `practice-${Date.now()}`;
+  const now = new Date().toISOString();
+  const existing = getPracticeById(safeId);
+
+  const createdAt = existing?.created_at || now;
+  const pubVal = is_published ? 1 : 0;
+
+  db.prepare(`
+    INSERT OR REPLACE INTO practices (id, order_index, topic, title, group_name, is_published, content, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    safeId,
+    Number(order_index || 0),
+    topic || "Общее",
+    title || safeId,
+    group_name || "all",
+    pubVal,
+    content || "",
+    createdAt,
+    now
+  );
+
+  return getPracticeById(safeId);
+}
+
+export function deletePractice(id) {
+  const db = getDb();
+  db.prepare("DELETE FROM practices WHERE id = ?").run(id);
+  return true;
+}
+
+// ==========================================
+// HOMEWORKS REPOSITORY
+// ==========================================
+
+export function getAllHomeworks({ group = null, includeUnpublished = false, userId = null } = {}) {
+  const db = getDb();
+  let query = "SELECT * FROM homeworks";
+  const conditions = [];
+  const params = [];
+
+  if (!includeUnpublished) {
+    conditions.push("is_published = 1");
+  }
+
+  if (group && group !== "all") {
+    conditions.push("(group_name = 'all' OR group_name = ?)");
+    params.push(group);
+  }
+
+  if (conditions.length > 0) {
+    query += " WHERE " + conditions.join(" AND ");
+  }
+
+  query += " ORDER BY order_index ASC, id ASC";
+  const rows = db.prepare(query).all(...params);
+
+  return rows.map((r) => {
+    let submission = null;
+    if (userId) {
+      submission = getHomeworkSubmission(r.id, userId);
+    }
+    const subsCount = db.prepare("SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id = ?").get(r.id)?.cnt || 0;
+
+    return {
+      id: r.id,
+      order: r.order_index,
+      order_index: r.order_index,
+      topic: r.topic || "Общее",
+      title: r.title || r.id,
+      group_name: r.group_name || "all",
+      deadline: r.deadline || "",
+      max_score: Number(r.max_score || 10),
+      is_published: Boolean(r.is_published),
+      content: r.content || "",
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      submissions_count: subsCount,
+      user_submission: submission,
+    };
+  });
+}
+
+export function getHomeworkById(id, userId = null) {
+  const db = getDb();
+  const r = db.prepare("SELECT * FROM homeworks WHERE id = ?").get(id);
+  if (!r) return null;
+
+  let submission = null;
+  if (userId) {
+    submission = getHomeworkSubmission(r.id, userId);
+  }
+  const subsCount = db.prepare("SELECT COUNT(*) as cnt FROM homework_submissions WHERE homework_id = ?").get(r.id)?.cnt || 0;
+
+  return {
+    id: r.id,
+    order: r.order_index,
+    order_index: r.order_index,
+    topic: r.topic || "Общее",
+    title: r.title || r.id,
+    group_name: r.group_name || "all",
+    deadline: r.deadline || "",
+    max_score: Number(r.max_score || 10),
+    is_published: Boolean(r.is_published),
+    content: r.content || "",
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    submissions_count: subsCount,
+    user_submission: submission,
+  };
+}
+
+export function saveHomework({
+  id,
+  title,
+  topic = "Общее",
+  order_index = 0,
+  group_name = "all",
+  deadline = "",
+  max_score = 10,
+  is_published = 1,
+  content = "",
+}) {
+  const db = getDb();
+  const safeId = id ? String(id).trim() : `hw-${Date.now()}`;
+  const now = new Date().toISOString();
+  const existing = getHomeworkById(safeId);
+
+  const createdAt = existing?.created_at || now;
+  const pubVal = is_published ? 1 : 0;
+
+  db.prepare(`
+    INSERT OR REPLACE INTO homeworks (id, order_index, topic, title, group_name, deadline, max_score, is_published, content, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    safeId,
+    Number(order_index || 0),
+    topic || "Общее",
+    title || safeId,
+    group_name || "all",
+    deadline || "",
+    Number(max_score || 10),
+    pubVal,
+    content || "",
+    createdAt,
+    now
+  );
+
+  return getHomeworkById(safeId);
+}
+
+export function deleteHomework(id) {
+  const db = getDb();
+  db.prepare("DELETE FROM homework_submissions WHERE homework_id = ?").run(id);
+  db.prepare("DELETE FROM homeworks WHERE id = ?").run(id);
+  return true;
+}
+
+// ==========================================
+// HOMEWORK SUBMISSIONS REPOSITORY
+// ==========================================
+
+export function saveHomeworkSubmission({
+  homework_id,
+  user_id,
+  user_name,
+  group_name,
+  file_name,
+  file_path,
+  file_size = 0,
+}) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const existing = getHomeworkSubmission(homework_id, user_id);
+
+  const subId = existing?.id || `sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const status = existing?.status === "passed" ? "passed" : "pending";
+  const score = existing?.score || 0;
+  const teacherComment = existing?.teacher_comment || "";
+
+  db.prepare(`
+    INSERT OR REPLACE INTO homework_submissions (id, homework_id, user_id, user_name, group_name, file_name, file_path, file_size, status, score, teacher_comment, submitted_at, reviewed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    subId,
+    homework_id,
+    user_id,
+    user_name || "Студент",
+    group_name || "",
+    file_name || "solution.pdf",
+    file_path,
+    Number(file_size || 0),
+    status,
+    score,
+    teacherComment,
+    now,
+    existing?.reviewed_at || null
+  );
+
+  return getHomeworkSubmissionById(subId);
+}
+
+export function getHomeworkSubmission(homework_id, user_id) {
+  const db = getDb();
+  const r = db.prepare("SELECT * FROM homework_submissions WHERE homework_id = ? AND user_id = ?").get(homework_id, user_id);
+  return r || null;
+}
+
+export function getHomeworkSubmissionById(id) {
+  const db = getDb();
+  const r = db.prepare("SELECT * FROM homework_submissions WHERE id = ?").get(id);
+  return r || null;
+}
+
+export function getHomeworkSubmissions(homework_id, { group_name = null } = {}) {
+  const db = getDb();
+  let query = "SELECT * FROM homework_submissions WHERE homework_id = ?";
+  const params = [homework_id];
+
+  if (group_name && group_name !== "all") {
+    query += " AND group_name = ?";
+    params.push(group_name);
+  }
+
+  query += " ORDER BY submitted_at DESC";
+  return db.prepare(query).all(...params);
+}
+
+export function getAllHomeworkSubmissions() {
+  const db = getDb();
+  return db.prepare("SELECT * FROM homework_submissions ORDER BY submitted_at DESC").all();
+}
+
+export function reviewHomeworkSubmission(id, { status = "passed", score = 0, teacher_comment = "" } = {}) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE homework_submissions
+    SET status = ?, score = ?, teacher_comment = ?, reviewed_at = ?
+    WHERE id = ?
+  `).run(status, Number(score || 0), String(teacher_comment || "").trim(), now, id);
+
+  return getHomeworkSubmissionById(id);
+}
+
 

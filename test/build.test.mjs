@@ -956,6 +956,236 @@ test("tests catalog, custom test runner, and question pool are correctly generat
   assert.ok(!indexHtml.includes("admin.html"), "index.html must not contain static link to admin.html");
 });
 
+test("practices and homeworks: build outputs, REST API, PDF submission, and teacher review flow", async () => {
+  const ROOT = path.resolve(".");
+  const { handleApi } = await import("../src/server/api.mjs");
+  const { EventEmitter } = await import("node:events");
+
+  function mockReqRes(method, urlStr, body = null, headers = {}) {
+    const u = new URL(urlStr);
+    const req = new EventEmitter();
+    req.method = method;
+    req.url = u.pathname + u.search;
+    req.headers = { host: "localhost", ...headers };
+    const res = {
+      statusCode: 200,
+      headers: {},
+      writeHead(code, h) {
+        this.statusCode = code;
+        Object.assign(this.headers, h);
+      },
+      setHeader(k, v) {
+        this.headers[k] = v;
+      },
+      end(data) {
+        this.data = data;
+        try {
+          this.json = data ? JSON.parse(data) : null;
+        } catch {
+          this.json = null;
+        }
+      },
+    };
+    Promise.resolve().then(() => {
+      if (body) req.emit("data", JSON.stringify(body));
+      req.emit("end");
+    });
+    return { req, res };
+  }
+
+  function mockRes() {
+    return {
+      statusCode: 200,
+      headers: {},
+      writeHead(code, h) {
+        this.statusCode = code;
+        Object.assign(this.headers, h);
+      },
+      setHeader(k, v) {
+        this.headers[k] = v;
+      },
+      end(data) {
+        this.data = data;
+        try {
+          this.json = data ? JSON.parse(data) : null;
+        } catch {
+          this.json = null;
+        }
+      },
+    };
+  }
+
+  // 1. Static build verification
+  const practicesHtmlFile = path.join(ROOT, "dist", "practices", "index.html");
+  const homeworksHtmlFile = path.join(ROOT, "dist", "homeworks", "index.html");
+  const practicesJsonFile = path.join(ROOT, "dist", "practices.json");
+  const homeworksJsonFile = path.join(ROOT, "dist", "homeworks.json");
+
+  assert.ok(fs.existsSync(practicesHtmlFile), "dist/practices/index.html must exist");
+  assert.ok(fs.existsSync(homeworksHtmlFile), "dist/homeworks/index.html must exist");
+  assert.ok(fs.existsSync(practicesJsonFile), "dist/practices.json must exist");
+  assert.ok(fs.existsSync(homeworksJsonFile), "dist/homeworks.json must exist");
+
+  const pContent = fs.readFileSync(practicesHtmlFile, "utf8");
+  assert.ok(pContent.includes("practices.js"), "Practices page must include practices.js");
+  assert.ok(pContent.includes("practice-group-select"), "Practices page must include group selector");
+  assert.ok(pContent.includes("href=\"../practices/\""), "Navbar must include practices tab");
+  assert.ok(pContent.includes("href=\"../homeworks/\""), "Navbar must include homeworks tab");
+
+  const hwContent = fs.readFileSync(homeworksHtmlFile, "utf8");
+  assert.ok(hwContent.includes("homeworks.js"), "Homeworks page must include homeworks.js");
+  assert.ok(hwContent.includes("homework-detail-sheet"), "Homeworks page must include detail sheet");
+
+  // 2. Practices REST API
+  const { req: rPracGet, res: sPracGet } = mockReqRes("GET", "http://localhost/api/practices");
+  await handleApi(rPracGet, sPracGet, "/api/practices");
+  assert.strictEqual(sPracGet.statusCode, 200);
+  assert.ok(Array.isArray(sPracGet.json.practices), "GET /api/practices must return practices array");
+
+  // Admin authentication
+  const { req: rAdminLog, res: sAdminLog } = mockReqRes("POST", "http://localhost/api/auth/login", {
+    login: "admin@itmo.ru",
+    password: "admin",
+  });
+  await handleApi(rAdminLog, sAdminLog, "/api/auth/login");
+  assert.strictEqual(sAdminLog.statusCode, 200);
+  const adminToken = sAdminLog.json.token;
+
+  // Create practice (as admin)
+  const testPracticeId = `test_practice_${Date.now()}`;
+  const { req: rPracPost, res: sPracPost } = mockReqRes("POST", "http://localhost/api/admin/practices", {
+    id: testPracticeId,
+    title: "Тестовая практика по булевым функциям",
+    topic: "Булевы функции",
+    group_name: "M3115",
+    is_published: 1,
+    content: "## Задачи на булевы функции\n1. Найти СКНФ.",
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rPracPost, sPracPost, "/api/admin/practices");
+  assert.strictEqual(sPracPost.statusCode, 200);
+  assert.strictEqual(sPracPost.json.ok, true);
+
+  // Edit practice
+  const { req: rPracPut, res: sPracPut } = mockReqRes("PUT", `http://localhost/api/admin/practices/${testPracticeId}`, {
+    title: "Обновленная практика по булевым функциям",
+    is_published: 1,
+    group_name: "M3115",
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rPracPut, sPracPut, `/api/admin/practices/${testPracticeId}`);
+  assert.strictEqual(sPracPut.statusCode, 200);
+
+  // Delete practice
+  const { req: rPracDel, res: sPracDel } = mockReqRes("DELETE", `http://localhost/api/admin/practices/${testPracticeId}`, {}, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rPracDel, sPracDel, `/api/admin/practices/${testPracticeId}`);
+  assert.strictEqual(sPracDel.statusCode, 200);
+
+  // 3. Homeworks REST API
+  const testHwId = `test_hw_${Date.now()}`;
+  const { req: rHwPost, res: sHwPost } = mockReqRes("POST", "http://localhost/api/admin/homeworks", {
+    id: testHwId,
+    title: "Тестовое ДЗ: Графы и остовы",
+    topic: "Графы",
+    group_name: "all",
+    deadline: "2026-11-01 23:59",
+    max_score: 10,
+    is_published: 1,
+    content: "### Задачи к сдаче\n1. Построить остов Краскала.",
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rHwPost, sHwPost, "/api/admin/homeworks");
+  assert.strictEqual(sHwPost.statusCode, 200);
+  assert.strictEqual(sHwPost.json.ok, true);
+
+  // 4. Student Auth & PDF Submission
+  const studentEmail = `hw_student_${Date.now()}@itmo.ru`;
+  const { req: rReg, res: sReg } = mockReqRes("POST", "http://localhost/api/auth/register", {
+    email: studentEmail,
+    password: "password123",
+    name: "Иван Иванов",
+    group: "M3115",
+  });
+  await handleApi(rReg, sReg, "/api/auth/register");
+  assert.strictEqual(sReg.statusCode, 200);
+  const studentToken = sReg.json.token;
+
+  // Mock valid PDF buffer (PDF magic header %PDF-1.4 ...)
+  const validPdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF");
+
+  // Submit PDF
+  const boundary = "----WebKitFormBoundaryX7Y8Z9";
+  const multipartBody = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="ivanov_hw.pdf"\r\nContent-Type: application/pdf\r\n\r\n`),
+    validPdfBuffer,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+
+  const reqSubmit = new EventEmitter();
+  reqSubmit.method = "POST";
+  reqSubmit.url = `http://localhost/api/homeworks/${testHwId}/submit`;
+  reqSubmit.headers = {
+    authorization: `Bearer ${studentToken}`,
+    "content-type": `multipart/form-data; boundary=${boundary}`,
+  };
+
+  const resSubmit = mockRes();
+  const submitPromise = handleApi(reqSubmit, resSubmit, `/api/homeworks/${testHwId}/submit`);
+  reqSubmit.emit("data", multipartBody);
+  reqSubmit.emit("end");
+  await submitPromise;
+
+  assert.strictEqual(resSubmit.statusCode, 200);
+  assert.strictEqual(resSubmit.json.ok, true);
+  assert.ok(resSubmit.json.submission.id, "Submission must return submission ID");
+  assert.strictEqual(resSubmit.json.submission.status, "pending");
+  const submissionId = resSubmit.json.submission.id;
+  const filePath = resSubmit.json.submission.file_path;
+
+  // Verify PDF file serving
+  const { req: rPdf, res: sPdf } = mockReqRes("GET", `http://localhost/api/uploads/homeworks/${filePath}`);
+  await handleApi(rPdf, sPdf, `/api/uploads/homeworks/${filePath}`);
+  assert.strictEqual(sPdf.statusCode, 200);
+  assert.strictEqual(sPdf.headers["Content-Type"], "application/pdf");
+
+  // 5. Teacher Review
+  const { req: rRev, res: sRev } = mockReqRes("PUT", `http://localhost/api/admin/homeworks/submissions/${submissionId}/review`, {
+    status: "passed",
+    score: 9.5,
+    teacher_comment: "Отличное подробное решение!",
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rRev, sRev, `/api/admin/homeworks/submissions/${submissionId}/review`);
+  assert.strictEqual(sRev.statusCode, 200);
+  assert.strictEqual(sRev.json.ok, true);
+  assert.strictEqual(sRev.json.submission.status, "passed");
+  assert.strictEqual(sRev.json.submission.score, 9.5);
+
+  // 6. Student checks submission status
+  const { req: rSubCheck, res: sSubCheck } = mockReqRes("GET", `http://localhost/api/homeworks/${testHwId}/submission`, {}, {
+    authorization: `Bearer ${studentToken}`,
+  });
+  await handleApi(rSubCheck, sSubCheck, `/api/homeworks/${testHwId}/submission`);
+  assert.strictEqual(sSubCheck.statusCode, 200);
+  assert.strictEqual(sSubCheck.json.submission.status, "passed");
+  assert.strictEqual(sSubCheck.json.submission.score, 9.5);
+  assert.strictEqual(sSubCheck.json.submission.teacher_comment, "Отличное подробное решение!");
+
+  // Cleanup test homework
+  const { req: rHwDel, res: sHwDel } = mockReqRes("DELETE", `http://localhost/api/admin/homeworks/${testHwId}`, {}, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rHwDel, sHwDel, `/api/admin/homeworks/${testHwId}`);
+  assert.strictEqual(sHwDel.statusCode, 200);
+});
+
+
 
 
 

@@ -238,6 +238,20 @@ function renderAdmin() {
       onclick: () => { currentTab = "colloquiums"; renderAdmin(); },
     }, "🎓 Коллоквиумы"),
     el("button", {
+      class: `admin-nav-item ${currentTab === "practices" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "practices",
+      onclick: () => { currentTab = "practices"; renderAdmin(); },
+    }, "📝 Практики"),
+    el("button", {
+      class: `admin-nav-item ${currentTab === "homeworks" ? "active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": currentTab === "homeworks",
+      onclick: () => { currentTab = "homeworks"; renderAdmin(); },
+    }, "📤 ДЗ и Проверка"),
+    el("button", {
       class: `admin-nav-item ${currentTab === "contests" ? "active" : ""}`,
       type: "button",
       role: "tab",
@@ -285,6 +299,10 @@ function renderAdmin() {
     notesTab(container);
   } else if (currentTab === "colloquiums") {
     colloquiumsTab(container);
+  } else if (currentTab === "practices") {
+    practicesTab(container);
+  } else if (currentTab === "homeworks") {
+    homeworksTab(container);
   } else if (currentTab === "contests") {
     contestsTab(container);
   } else {
@@ -3538,5 +3556,698 @@ async function contestsTab(container) {
 
   render();
 }
+
+// ==========================================
+// 6. ВКЛАДКА: ПРАКТИКИ
+// ==========================================
+
+async function practicesTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем список практик…"));
+  let practices = [];
+  try {
+    const res = await json("/api/practices?all=1");
+    practices = Array.isArray(res) ? res : (res.practices || []);
+  } catch (err) {
+    try {
+      practices = await json("/practices.json");
+    } catch {
+      container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки практик: ${err.message}`));
+      return;
+    }
+  }
+
+  const createBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: () => openPracticeEditor(null, container),
+  }, "➕ Создать новую практику");
+
+  const head = el("div", { class: "test-manager-head" },
+    el("div", {},
+      el("h2", { style: "margin: 0;" }, "Управление практическими занятиями"),
+      el("p", { class: "muted", style: "margin: 0.2rem 0 0;" }, "Заполняйте практики материалами и задачами. Студенты открывают их на парах для решения.")),
+    createBtn);
+
+  const groupsSet = new Set(["Все группы"]);
+  for (const p of practices) {
+    if (p.group_name && p.group_name !== "all") groupsSet.add(p.group_name);
+  }
+  let activeGroup = "Все группы";
+
+  const groupFilterContainer = el("div", { class: "topic-tabs", style: "margin-bottom: 1.25rem;" });
+  const grid = el("div", { class: "note-cards-admin-grid" });
+
+  function renderList() {
+    groupFilterContainer.replaceChildren(
+      ...Array.from(groupsSet).map((g) =>
+        el("button", {
+          class: `topic-tab-btn ${activeGroup === g ? "active" : ""}`,
+          type: "button",
+          onclick: () => { activeGroup = g; renderList(); },
+        }, g)
+      )
+    );
+
+    const filtered = activeGroup === "Все группы"
+      ? practices
+      : practices.filter((p) => p.group_name === activeGroup || p.group_name === "all");
+
+    grid.replaceChildren();
+
+    if (!filtered.length) {
+      grid.replaceChildren(el("p", { class: "muted", style: "grid-column: 1 / -1; padding: 2rem; text-align: center;" }, "Практик пока нет. Нажмите «Создать новую практику»."));
+      return;
+    }
+
+    for (const p of filtered) {
+      const isPub = Boolean(p.is_published);
+      const groupBadge = p.group_name && p.group_name !== "all" ? `Группа: ${p.group_name}` : "Все группы";
+
+      const card = el("div", { class: "note-admin-card" },
+        el("div", { style: "display: flex; gap: 0.85rem; align-items: flex-start;" },
+          el("span", { style: "font-size: 2.2rem; line-height: 1;" }, "📝"),
+          el("div", { style: "flex: 1; min-width: 0;" },
+            el("div", { style: "font-size: 1.15rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.35rem;" }, p.title || p.id),
+            el("div", { style: "display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;" },
+              el("span", { class: "tag tag-accent" }, `📌 ${p.topic || "Общее"}`),
+              el("span", { class: "tag" }, `👥 ${groupBadge}`),
+              el("span", { class: "tag" }, `№${p.order_index ?? p.order ?? 1}`),
+              el("span", {
+                class: "tag",
+                style: isPub ? "background: var(--good-soft); color: var(--good); font-weight: 600;" : "background: var(--sunken); color: var(--muted);"
+              }, isPub ? "Выдано ✅" : "Черновик (не выдано) 🔒")),
+            el("p", { class: "muted", style: "margin: 0; font-size: 0.88rem; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" },
+              p.content ? p.content.slice(0, 150) + "..." : "Текст практики пуст"))),
+        el("div", { class: "test-card-actions" },
+          el("button", {
+            class: "btn primary btn-sm",
+            type: "button",
+            onclick: () => openPracticeEditor(p.id, container),
+          }, "✏️ Редактировать"),
+          el("button", {
+            class: "btn quiet btn-sm",
+            type: "button",
+            onclick: () => openPreviewModal(`practices/?id=${encodeURIComponent(p.id)}`, p.title || p.id),
+          }, "🔍 Просмотр"),
+          el("button", {
+            class: `btn btn-sm btn-visibility-toggle ${isPub ? "is-visible" : "is-hidden"}`,
+            type: "button",
+            onclick: async () => {
+              try {
+                await json(`/api/admin/practices/${encodeURIComponent(p.id)}`, {
+                  method: "PUT",
+                  body: { is_published: isPub ? 0 : 1 },
+                });
+                practicesTab(container);
+              } catch (e) {
+                alert(`Ошибка: ${e.message}`);
+              }
+            },
+          }, isPub ? "✅ Выдано" : "🔒 Не выдано"),
+          el("button", {
+            class: "btn quiet btn-sm btn-delete-action",
+            type: "button",
+            style: "color: var(--bad); margin-left: auto;",
+            onclick: async () => {
+              if (confirm(`Удалить практику «${p.title || p.id}»?`)) {
+                try {
+                  await json(`/api/admin/practices/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+                  practicesTab(container);
+                } catch (e) {
+                  alert(`Ошибка удаления: ${e.message}`);
+                }
+              }
+            },
+          }, "🗑️ Удалить"))
+      );
+      grid.append(card);
+    }
+  }
+
+  renderList();
+  container.replaceChildren(head, groupFilterContainer, grid);
+}
+
+function openPracticeEditor(practiceId, parentContainer) {
+  let dlg = document.getElementById("practice-editor-dialog");
+  if (!dlg) {
+    dlg = el("dialog", { class: "admin-preview-dialog", id: "practice-editor-dialog" });
+    document.body.append(dlg);
+  }
+
+  const isNew = !practiceId;
+  dlg.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загрузка редактора…"));
+  dlg.showModal();
+
+  (async () => {
+    let p = {
+      id: `practice-${Date.now()}`,
+      title: "",
+      topic: "Отношения",
+      group_name: "all",
+      order_index: 1,
+      is_published: 1,
+      content: "",
+    };
+
+    if (!isNew) {
+      try {
+        const res = await json(`/api/practices/${encodeURIComponent(practiceId)}`);
+        p = res.practice || p;
+      } catch (err) {
+        alert("Ошибка загрузки практики: " + err.message);
+        dlg.close();
+        return;
+      }
+    }
+
+    const titleInput = el("input", { class: "form-input", type: "text", value: p.title || "", placeholder: "Название практики..." });
+    const topicInput = el("input", { class: "form-input", type: "text", value: p.topic || "Общее", placeholder: "Тема..." });
+    const orderInput = el("input", { class: "form-input", type: "number", value: p.order_index ?? p.order ?? 1, style: "width: 100px;" });
+    
+    const groupSelect = el("select", { class: "form-select" });
+    const groupsList = ["all", "M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
+    for (const g of groupsList) {
+      const opt = el("option", { value: g }, g === "all" ? "Все группы (all)" : g);
+      if (p.group_name === g) opt.selected = true;
+      groupSelect.append(opt);
+    }
+
+    const pubCheckbox = el("input", { type: "checkbox" });
+    pubCheckbox.checked = Boolean(p.is_published);
+
+    const textarea = el("textarea", {
+      class: "form-input",
+      style: "font-family: monospace; font-size: 0.95rem; min-height: 400px; width: 100%; resize: vertical; line-height: 1.5;",
+      placeholder: "# Заголовок практики\n\n## 📝 Задачи\n1. Задача 1...\n2. Задача 2...",
+    }, p.content || "");
+
+    const previewBox = el("div", {
+      class: "markdown-body",
+      style: "min-height: 400px; max-height: 500px; overflow-y: auto; padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);",
+    });
+
+    function updatePreview() {
+      const raw = textarea.value || "";
+      if (window.marked && window.marked.parse) {
+        previewBox.innerHTML = window.marked.parse(raw);
+        if (window.renderMathInElement) {
+          try {
+            window.renderMathInElement(previewBox, {
+              delimiters: [
+                { left: "$$", right: "$$", display: true },
+                { left: "$", right: "$", display: false },
+              ],
+              throwOnError: false,
+            });
+          } catch {}
+        }
+      } else {
+        previewBox.textContent = raw;
+      }
+    }
+
+    textarea.oninput = updatePreview;
+    updatePreview();
+
+    const saveBtn = el("button", {
+      class: "btn primary",
+      type: "button",
+      onclick: async () => {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Сохранение…";
+        try {
+          const payload = {
+            id: p.id,
+            title: titleInput.value.trim() || p.id,
+            topic: topicInput.value.trim() || "Общее",
+            group_name: groupSelect.value,
+            order_index: parseInt(orderInput.value) || 1,
+            is_published: pubCheckbox.checked ? 1 : 0,
+            content: textarea.value,
+          };
+
+          if (isNew) {
+            await json("/api/admin/practices", { method: "POST", body: payload });
+          } else {
+            await json(`/api/admin/practices/${encodeURIComponent(p.id)}`, { method: "PUT", body: payload });
+          }
+
+          dlg.close();
+          practicesTab(parentContainer);
+        } catch (err) {
+          alert("Ошибка сохранения: " + err.message);
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Сохранить";
+        }
+      },
+    }, "💾 Сохранить");
+
+    const contentGrid = el("div", { style: "display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;" },
+      el("div", {},
+        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Редактор Markdown:"),
+        textarea),
+      el("div", {},
+        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Живой предпросмотр (с формулами KaTeX):"),
+        previewBox)
+    );
+
+    dlg.replaceChildren(
+      el("div", { style: "padding: 1.5rem; max-width: 1200px; width: 95vw; max-height: 90vh; overflow-y: auto;" },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem;" },
+          el("h2", { style: "margin: 0; font-size: 1.35rem;" }, isNew ? "➕ Создание практики" : `✏️ Редактирование: ${p.title || p.id}`),
+          el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => dlg.close() }, "✕ Закрыть")),
+        el("div", { style: "display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;" },
+          el("label", {}, el("span", { class: "field-label" }, "Название практики:"), titleInput),
+          el("label", {}, el("span", { class: "field-label" }, "Тема:"), topicInput),
+          el("label", {}, el("span", { class: "field-label" }, "Для группы:"), groupSelect),
+          el("label", {}, el("span", { class: "field-label" }, "Порядковый номер:"), orderInput)),
+        el("label", { style: "display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;" },
+          pubCheckbox,
+          el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, "Выдано студентам (если галочка снята, практика сохранена как черновик)")),
+        contentGrid,
+        el("div", { style: "display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1rem;" },
+          el("button", { class: "btn quiet", type: "button", onclick: () => dlg.close() }, "Отмена"),
+          saveBtn)
+      )
+    );
+  })();
+}
+
+// ==========================================
+// 7. ВКЛАДКА: ДОМАШНИЕ ЗАДАНИЯ И ПРОВЕРКА
+// ==========================================
+
+async function homeworksTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем список домашних заданий…"));
+  let homeworks = [];
+  try {
+    const res = await json("/api/homeworks?all=1");
+    homeworks = Array.isArray(res) ? res : (res.homeworks || []);
+  } catch (err) {
+    try {
+      homeworks = await json("/homeworks.json");
+    } catch {
+      container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки ДЗ: ${err.message}`));
+      return;
+    }
+  }
+
+  const createBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: () => openHomeworkEditor(null, container),
+  }, "➕ Создать домашнее задание");
+
+  const head = el("div", { class: "test-manager-head" },
+    el("div", {},
+      el("h2", { style: "margin: 0;" }, "Управление домашними заданиями и проверка работ"),
+      el("p", { class: "muted", style: "margin: 0.2rem 0 0;" }, "Публикуйте ДЗ, задавайте дедлайны и группы, проверяйте загруженные студентами PDF-файлы и выставляйте оценки.")),
+    createBtn);
+
+  const grid = el("div", { class: "note-cards-admin-grid" });
+
+  for (const h of homeworks) {
+    const isPub = Boolean(h.is_published);
+    const groupBadge = h.group_name && h.group_name !== "all" ? `Группа: ${h.group_name}` : "Все группы";
+    const subsCount = h.submissions_count || 0;
+
+    const card = el("div", { class: "note-admin-card" },
+      el("div", { style: "display: flex; gap: 0.85rem; align-items: flex-start;" },
+        el("span", { style: "font-size: 2.2rem; line-height: 1;" }, "📤"),
+        el("div", { style: "flex: 1; min-width: 0;" },
+          el("div", { style: "font-size: 1.15rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.35rem;" }, h.title || h.id),
+          el("div", { style: "display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;" },
+            el("span", { class: "tag tag-accent" }, `📌 ${h.topic || "Общее"}`),
+            el("span", { class: "tag" }, `👥 ${groupBadge}`),
+            el("span", { class: "tag" }, `⭐ Макс: ${h.max_score} б.`),
+            h.deadline ? el("span", { class: "tag" }, `🗓️ ${h.deadline}`) : null,
+            el("span", {
+              class: "tag",
+              style: isPub ? "background: var(--good-soft); color: var(--good); font-weight: 600;" : "background: var(--sunken); color: var(--muted);"
+            }, isPub ? "Выдано ✅" : "Черновик 🔒")),
+          el("div", { style: "margin-top: 0.6rem; display: flex; align-items: center; gap: 0.5rem;" },
+            el("span", {
+              class: "badge",
+              style: subsCount > 0 ? "background: var(--accent-soft); color: var(--accent-ink); font-weight: 600;" : "background: var(--sunken); color: var(--muted);"
+            }, `📥 Сдано работ: ${subsCount}`)))),
+      el("div", { class: "test-card-actions" },
+        el("button", {
+          class: "btn primary btn-sm",
+          type: "button",
+          style: "font-weight: 600;",
+          onclick: () => openHomeworkSubmissionsReview(h, container),
+        }, `👥 Работы студентов (${subsCount})`),
+        el("button", {
+          class: "btn quiet btn-sm",
+          type: "button",
+          onclick: () => openHomeworkEditor(h.id, container),
+        }, "✏️ Редактировать"),
+        el("button", {
+          class: "btn quiet btn-sm",
+          type: "button",
+          onclick: () => openPreviewModal(`homeworks/?id=${encodeURIComponent(h.id)}`, h.title || h.id),
+        }, "🔍 Просмотр"),
+        el("button", {
+          class: `btn btn-sm btn-visibility-toggle ${isPub ? "is-visible" : "is-hidden"}`,
+          type: "button",
+          onclick: async () => {
+            try {
+              await json(`/api/admin/homeworks/${encodeURIComponent(h.id)}`, {
+                method: "PUT",
+                body: { is_published: isPub ? 0 : 1 },
+              });
+              homeworksTab(container);
+            } catch (e) {
+              alert(`Ошибка: ${e.message}`);
+            }
+          },
+        }, isPub ? "✅ Выдано" : "🔒 Не выдано"),
+        el("button", {
+          class: "btn quiet btn-sm btn-delete-action",
+          type: "button",
+          style: "color: var(--bad); margin-left: auto;",
+          onclick: async () => {
+            if (confirm(`Удалить ДЗ «${h.title || h.id}» и все прикреплённые решения?`)) {
+              try {
+                await json(`/api/admin/homeworks/${encodeURIComponent(h.id)}`, { method: "DELETE" });
+                homeworksTab(container);
+              } catch (e) {
+                alert(`Ошибка удаления: ${e.message}`);
+              }
+            }
+          },
+        }, "🗑️ Удалить"))
+    );
+    grid.append(card);
+  }
+
+  container.replaceChildren(head, grid);
+}
+
+function openHomeworkEditor(hwId, parentContainer) {
+  let dlg = document.getElementById("homework-editor-dialog");
+  if (!dlg) {
+    dlg = el("dialog", { class: "admin-preview-dialog", id: "homework-editor-dialog" });
+    document.body.append(dlg);
+  }
+
+  const isNew = !hwId;
+  dlg.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загрузка редактора…"));
+  dlg.showModal();
+
+  (async () => {
+    let h = {
+      id: `hw-${Date.now()}`,
+      title: "",
+      topic: "Отношения",
+      group_name: "all",
+      deadline: "",
+      max_score: 10,
+      order_index: 1,
+      is_published: 1,
+      content: "",
+    };
+
+    if (!isNew) {
+      try {
+        const res = await json(`/api/homeworks/${encodeURIComponent(hwId)}`);
+        h = res.homework || h;
+      } catch (err) {
+        alert("Ошибка загрузки ДЗ: " + err.message);
+        dlg.close();
+        return;
+      }
+    }
+
+    const titleInput = el("input", { class: "form-input", type: "text", value: h.title || "", placeholder: "Название ДЗ..." });
+    const topicInput = el("input", { class: "form-input", type: "text", value: h.topic || "Общее", placeholder: "Тема..." });
+    const deadlineInput = el("input", { class: "form-input", type: "text", value: h.deadline || "", placeholder: "2026-10-25 23:59" });
+    const maxScoreInput = el("input", { class: "form-input", type: "number", value: h.max_score || 10, style: "width: 100px;" });
+    const orderInput = el("input", { class: "form-input", type: "number", value: h.order_index ?? h.order ?? 1, style: "width: 80px;" });
+
+    const groupSelect = el("select", { class: "form-select" });
+    const groupsList = ["all", "M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
+    for (const g of groupsList) {
+      const opt = el("option", { value: g }, g === "all" ? "Все группы (all)" : g);
+      if (h.group_name === g) opt.selected = true;
+      groupSelect.append(opt);
+    }
+
+    const pubCheckbox = el("input", { type: "checkbox" });
+    pubCheckbox.checked = Boolean(h.is_published);
+
+    const textarea = el("textarea", {
+      class: "form-input",
+      style: "font-family: monospace; font-size: 0.95rem; min-height: 380px; width: 100%; resize: vertical; line-height: 1.5;",
+      placeholder: "# Домашнее задание\n\n### Задачи\n1. Задача 1...\n2. Задача 2...",
+    }, h.content || "");
+
+    const previewBox = el("div", {
+      class: "markdown-body",
+      style: "min-height: 380px; max-height: 480px; overflow-y: auto; padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);",
+    });
+
+    function updatePreview() {
+      const raw = textarea.value || "";
+      if (window.marked && window.marked.parse) {
+        previewBox.innerHTML = window.marked.parse(raw);
+        if (window.renderMathInElement) {
+          try {
+            window.renderMathInElement(previewBox, {
+              delimiters: [
+                { left: "$$", right: "$$", display: true },
+                { left: "$", right: "$", display: false },
+              ],
+              throwOnError: false,
+            });
+          } catch {}
+        }
+      } else {
+        previewBox.textContent = raw;
+      }
+    }
+
+    textarea.oninput = updatePreview;
+    updatePreview();
+
+    const saveBtn = el("button", {
+      class: "btn primary",
+      type: "button",
+      onclick: async () => {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Сохранение…";
+        try {
+          const payload = {
+            id: h.id,
+            title: titleInput.value.trim() || h.id,
+            topic: topicInput.value.trim() || "Общее",
+            group_name: groupSelect.value,
+            deadline: deadlineInput.value.trim(),
+            max_score: parseFloat(maxScoreInput.value) || 10,
+            order_index: parseInt(orderInput.value) || 1,
+            is_published: pubCheckbox.checked ? 1 : 0,
+            content: textarea.value,
+          };
+
+          if (isNew) {
+            await json("/api/admin/homeworks", { method: "POST", body: payload });
+          } else {
+            await json(`/api/admin/homeworks/${encodeURIComponent(h.id)}`, { method: "PUT", body: payload });
+          }
+
+          dlg.close();
+          homeworksTab(parentContainer);
+        } catch (err) {
+          alert("Ошибка сохранения: " + err.message);
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Сохранить";
+        }
+      },
+    }, "💾 Сохранить");
+
+    const contentGrid = el("div", { style: "display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;" },
+      el("div", {},
+        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Условия задач (Markdown):"),
+        textarea),
+      el("div", {},
+        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Предпросмотр (с формулами KaTeX):"),
+        previewBox)
+    );
+
+    dlg.replaceChildren(
+      el("div", { style: "padding: 1.5rem; max-width: 1200px; width: 95vw; max-height: 90vh; overflow-y: auto;" },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem;" },
+          el("h2", { style: "margin: 0; font-size: 1.35rem;" }, isNew ? "➕ Создание домашнего задания" : `✏️ Редактирование: ${h.title || h.id}`),
+          el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => dlg.close() }, "✕ Закрыть")),
+        el("div", { style: "display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr; gap: 0.85rem; margin-bottom: 1rem;" },
+          el("label", {}, el("span", { class: "field-label" }, "Название:"), titleInput),
+          el("label", {}, el("span", { class: "field-label" }, "Тема:"), topicInput),
+          el("label", {}, el("span", { class: "field-label" }, "Группа:"), groupSelect),
+          el("label", {}, el("span", { class: "field-label" }, "Дедлайн (дата и время):"), deadlineInput),
+          el("label", {}, el("span", { class: "field-label" }, "Макс. балл:"), maxScoreInput)),
+        el("label", { style: "display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;" },
+          pubCheckbox,
+          el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, "Выдано студентам (активно для сдачи)")),
+        contentGrid,
+        el("div", { style: "display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1rem;" },
+          el("button", { class: "btn quiet", type: "button", onclick: () => dlg.close() }, "Отмена"),
+          saveBtn)
+      )
+    );
+  })();
+}
+
+function openHomeworkSubmissionsReview(hw, parentContainer) {
+  let dlg = document.getElementById("homework-review-dialog");
+  if (!dlg) {
+    dlg = el("dialog", { class: "admin-preview-dialog", id: "homework-review-dialog" });
+    document.body.append(dlg);
+  }
+
+  dlg.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загрузка сданных работ…"));
+  dlg.showModal();
+
+  async function loadSubmissions() {
+    try {
+      const res = await json(`/api/admin/homeworks/${encodeURIComponent(hw.id)}/submissions`);
+      const subs = res.submissions || [];
+      renderReviewUI(subs);
+    } catch (err) {
+      dlg.replaceChildren(
+        el("div", { style: "padding: 2rem;" },
+          el("p", { class: "field-error" }, `Ошибка загрузки: ${err.message}`),
+          el("button", { class: "btn primary", onclick: () => dlg.close() }, "Закрыть"))
+      );
+    }
+  }
+
+  function renderReviewUI(subs) {
+    const listBody = el("div", { style: "display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;" });
+
+    if (!subs.length) {
+      listBody.replaceChildren(
+        el("div", { style: "padding: 3rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius);" },
+          el("div", { style: "font-size: 2rem; margin-bottom: 0.5rem;" }, "📂"),
+          "По этому домашнему заданию студенты пока не присылали решений.")
+      );
+    } else {
+      for (const s of subs) {
+        const fileUrl = `/api/uploads/homeworks/${encodeURIComponent(s.file_path)}`;
+        const dateStr = s.submitted_at ? new Date(s.submitted_at).toLocaleString("ru-RU") : "—";
+
+        let statusClass = "badge-gray";
+        let statusText = "На проверке ⏳";
+        if (s.status === "passed") { statusClass = "badge-success"; statusText = `Зачёт (${s.score}/${hw.max_score})`; }
+        else if (s.status === "revise") { statusClass = "badge-warning"; statusText = "На доработке ⚠️"; }
+        else if (s.status === "failed") { statusClass = "badge-danger"; statusText = `Незачёт (${s.score}/${hw.max_score})`; }
+
+        const rowCard = el("div", {
+          style: "padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); display: flex; flex-direction: column; gap: 0.75rem;",
+        });
+
+        const topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;" },
+          el("div", { style: "display: flex; align-items: center; gap: 0.75rem;" },
+            el("span", { style: "font-weight: 700; font-size: 1.1rem;" }, s.user_name || "Студент"),
+            el("span", { class: "tag tag-accent" }, s.group_name || "Без группы"),
+            el("span", { class: "tag" }, `Отправлено: ${dateStr}`)),
+          el("div", { style: "display: flex; align-items: center; gap: 0.75rem;" },
+            el("span", { class: `badge ${statusClass}`, style: "font-weight: 600; padding: 0.3rem 0.65rem;" }, statusText),
+            el("a", {
+              href: fileUrl,
+              target: "_blank",
+              rel: "noopener",
+              class: "btn primary btn-sm",
+              style: "text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;",
+            }, "📄 Открыть PDF"))
+        );
+
+        // Grading inline block
+        const verdictSelect = el("select", { class: "form-select form-select-sm", style: "width: 160px;" },
+          el("option", { value: "passed" }, "✅ Зачёт"),
+          el("option", { value: "revise" }, "⚠️ На доработке"),
+          el("option", { value: "failed" }, "❌ Незачёт"),
+          el("option", { value: "pending" }, "⏳ На проверке")
+        );
+        verdictSelect.value = s.status || "passed";
+
+        const scoreInput = el("input", {
+          class: "form-input form-input-sm",
+          type: "number",
+          step: "0.5",
+          min: "0",
+          max: String(hw.max_score || 10),
+          value: s.score || 0,
+          style: "width: 80px;",
+        });
+
+        const commentTextarea = el("textarea", {
+          class: "form-input form-input-sm",
+          rows: "2",
+          placeholder: "Комментарий преподавателя к работе студента...",
+          style: "flex: 1; resize: vertical;",
+        }, s.teacher_comment || "");
+
+        const saveScoreBtn = el("button", {
+          class: "btn primary btn-sm",
+          type: "button",
+          onclick: async () => {
+            saveScoreBtn.disabled = true;
+            saveScoreBtn.textContent = "Сохранение…";
+            try {
+              await json(`/api/admin/homeworks/submissions/${encodeURIComponent(s.id)}/review`, {
+                method: "PUT",
+                body: {
+                  status: verdictSelect.value,
+                  score: parseFloat(scoreInput.value) || 0,
+                  teacher_comment: commentTextarea.value.trim(),
+                },
+              });
+              saveScoreBtn.textContent = "✅ Сохранено!";
+              saveScoreBtn.style.background = "#22c55e";
+              setTimeout(() => {
+                loadSubmissions();
+              }, 600);
+            } catch (err) {
+              alert("Ошибка: " + err.message);
+              saveScoreBtn.disabled = false;
+              saveScoreBtn.textContent = "💾 Сохранить";
+            }
+          },
+        }, "💾 Сохранить");
+
+        const gradingForm = el("div", {
+          style: "display: flex; gap: 0.75rem; align-items: flex-start; padding-top: 0.75rem; border-top: 1px dashed var(--line); flex-wrap: wrap;",
+        },
+          el("label", { style: "display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; font-weight: 600;" },
+            "Вердикт:", verdictSelect),
+          el("label", { style: "display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; font-weight: 600;" },
+            `Балл (из ${hw.max_score}):`, scoreInput),
+          el("label", { style: "display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; font-weight: 600; flex: 1; min-width: 250px;" },
+            "Рецензия / Замечания:", commentTextarea),
+          el("div", { style: "display: flex; align-items: flex-end; padding-top: 1.25rem;" },
+            saveScoreBtn)
+        );
+
+        rowCard.append(topRow, gradingForm);
+        listBody.append(rowCard);
+      }
+    }
+
+    dlg.replaceChildren(
+      el("div", { style: "padding: 1.5rem; max-width: 1050px; width: 95vw; max-height: 90vh; overflow-y: auto;" },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem;" },
+          el("div", {},
+            el("h2", { style: "margin: 0; font-size: 1.35rem;" }, `Проверка решений: ${hw.title}`),
+            el("p", { class: "muted", style: "margin: 0.25rem 0 0;" }, `Максимальный балл: ${hw.max_score} · Всего сдали: ${subs.length} чел.`)),
+          el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => { dlg.close(); homeworksTab(parentContainer); } }, "✕ Закрыть")),
+        listBody
+      )
+    );
+  }
+
+  loadSubmissions();
+}
+
 
 

@@ -20,8 +20,10 @@ import {
   contestRoomPage,
   testsPage,
   customTestPage,
+  practicesPage,
+  homeworksPage,
 } from "./templates.mjs";
-import { syncFromDisk, getAllNotes, getAllTests, getAllColloquiumQuestions } from "../server/db.mjs";
+import { syncFromDisk, getAllNotes, getAllTests, getAllColloquiumQuestions, getAllPractices, getAllHomeworks } from "../server/db.mjs";
 
 const ROOT = path.resolve(".");
 const CONTENT = path.join(ROOT, "content");
@@ -655,6 +657,34 @@ export function build() {
     fs.writeFileSync(path.join(distTestsDir, "pool.json"), JSON.stringify(allQuestionsPool));
   }
 
+  // Build practices
+  let practices = [];
+  try {
+    practices = getAllPractices({ includeUnpublished: true });
+  } catch {}
+  const renderedPractices = practices.map((p) => ({
+    ...p,
+    html: renderMarkdown(p.content || "").html,
+  }));
+  const practicesOut = path.join(DIST, "practices");
+  fs.mkdirSync(practicesOut, { recursive: true });
+  fs.writeFileSync(path.join(practicesOut, "index.html"), practicesPage(renderedPractices, site));
+  fs.writeFileSync(path.join(DIST, "practices.json"), JSON.stringify(renderedPractices));
+
+  // Build homeworks
+  let homeworks = [];
+  try {
+    homeworks = getAllHomeworks({ includeUnpublished: true });
+  } catch {}
+  const renderedHomeworks = homeworks.map((h) => ({
+    ...h,
+    html: renderMarkdown(h.content || "").html,
+  }));
+  const homeworksOut = path.join(DIST, "homeworks");
+  fs.mkdirSync(homeworksOut, { recursive: true });
+  fs.writeFileSync(path.join(homeworksOut, "index.html"), homeworksPage(renderedHomeworks, site));
+  fs.writeFileSync(path.join(DIST, "homeworks.json"), JSON.stringify(renderedHomeworks));
+
   // Build admin & home
   const visibleColloquiumsCount = renderedColloquiums.filter((c) => !c.hidden).length;
   fs.writeFileSync(path.join(DIST, "admin.html"), adminPage(site));
@@ -664,5 +694,5 @@ export function build() {
 
   const total = tests.reduce((sum, t) => sum + t.count, 0);
   console.log(`Собрано: ${tests.length} теста, `
-    + `${tasksWord(total)}, ${notes.length} конспектов, ${renderedColloquiums.length} вопросов коллоквиума, ${Date.now() - t0} мс`);
+    + `${tasksWord(total)}, ${notes.length} конспектов, ${renderedColloquiums.length} вопросов коллоквиума, ${renderedPractices.length} практик, ${renderedHomeworks.length} ДЗ, ${Date.now() - t0} мс`);
 }

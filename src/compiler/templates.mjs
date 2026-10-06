@@ -42,6 +42,8 @@ export function navbarHtml(rel = "", activeTab = "", site = {}) {
       <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">🏠 Главная</a>
       <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">⏱️ Контесты</a>
       <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}tests/">📋 Тренажёры</a>
+      <a class="nav-item ${activeTab === 'practices' ? 'active' : ''}" href="${rel}practices/">📝 Практики</a>
+      <a class="nav-item ${activeTab === 'homeworks' ? 'active' : ''}" href="${rel}homeworks/">📤 ДЗ</a>
       <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">📚 Конспекты</a>
       <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">🎓 Коллоквиумы</a>
       <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">🏆 Рейтинг</a>
@@ -633,6 +635,8 @@ ${navbarHtml("", "home", site)}
     </p>
     <div class="hero-actions">
       <a href="tests/" class="btn primary">📋 Перейти к тренажёрам</a>
+      <a href="practices/" class="btn quiet">📝 Практики</a>
+      <a href="homeworks/" class="btn quiet">📤 ДЗ</a>
       <a href="contests/" class="btn quiet">⏱️ Летучки на парах</a>
       <a href="notes/" class="btn quiet">📚 Конспекты</a>
       <a href="colloquiums/" class="btn quiet">🎓 Коллоквиумы</a>
@@ -717,6 +721,38 @@ ${navbarHtml("", "home", site)}
         </p>
         <div class="portal-capability-footer">
           <a href="colloquiums/" class="btn quiet btn-sm">Учить определения →</a>
+        </div>
+      </article>
+
+      <!-- 5. Практические занятия -->
+      <article class="portal-capability-card">
+        <div class="portal-capability-top">
+          <span class="portal-capability-icon">📝</span>
+          <span class="portal-capability-tag">На семинарах</span>
+        </div>
+        <h3 class="portal-capability-title">Практические занятия и разборы</h3>
+        <div class="portal-capability-sub">Материалы семинаров · Решение задач</div>
+        <p class="portal-capability-desc">
+          Тексты и условия практических работ для решения в аудитории. Преподаватели наполняют практику формулами и задачами с распределением по учебным группам, а студенты изучают материалы прямо на паре.
+        </p>
+        <div class="portal-capability-footer">
+          <a href="practices/" class="btn quiet btn-sm">Открыть практики →</a>
+        </div>
+      </article>
+
+      <!-- 6. Домашние задания -->
+      <article class="portal-capability-card">
+        <div class="portal-capability-top">
+          <span class="portal-capability-icon">📤</span>
+          <span class="portal-capability-tag">Самостоятельно</span>
+        </div>
+        <h3 class="portal-capability-title">Домашние задания и сдача решений</h3>
+        <div class="portal-capability-sub">Загрузка PDF · Рецензии · Оценивание</div>
+        <p class="portal-capability-desc">
+          Задания для самостоятельной работы с дедлайнами и критериями. Загружайте решение в формате PDF, отслеживайте статус проверки («Зачёт» / «На доработке») и читайте развёрнутые комментарии преподавателя.
+        </p>
+        <div class="portal-capability-footer">
+          <a href="homeworks/" class="btn quiet btn-sm">Сдать ДЗ (PDF) →</a>
         </div>
       </article>
     </div>
@@ -1121,3 +1157,154 @@ export function adminPage(site = {}) {
 </html>
 `;
 }
+
+export function practicesPage(practices = [], site = {}) {
+  const visible = (practices || []).filter((p) => p.is_published);
+  const clientData = JSON.stringify(practices.map((p) => ({
+    id: p.id,
+    order: p.order_index ?? p.order ?? 0,
+    topic: p.topic || "Общее",
+    title: p.title || p.id,
+    group_name: p.group_name || "all",
+    is_published: Boolean(p.is_published),
+    content: p.content || "",
+    html: p.html || "",
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+  })));
+
+  const groupOptions = ["all", ...(site.groups || ["M3111", "M3112", "M3113", "M3114", "M3115"])]
+    .map((g) => `<option value="${esc(g)}">${g === "all" ? "Все группы" : esc(g)}</option>`)
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Практические занятия — Дискретная математика</title>
+  <link rel="stylesheet" href="../assets/katex/katex.min.css">
+  <link rel="stylesheet" href="../assets/style.css">
+  <script>window.__PRACTICES_DATA__ = ${clientData};</script>
+</head>
+<body class="practices-body-app platform-body">
+  ${navbarHtml("../", "practices", site)}
+  
+  <div class="practices-subbar">
+    <div class="practices-subbar-title">
+      <span>📝 Практики и семинары курса</span>
+    </div>
+    <div class="practices-subbar-controls">
+      <div class="group-filter-wrap">
+        <label for="practice-group-select" class="group-filter-label">Группа:</label>
+        <select id="practice-group-select" class="form-select form-select-sm">
+          ${groupOptions}
+        </select>
+      </div>
+      <button type="button" class="btn quiet btn-sm practices-mobile-menu-btn" id="practices-menu-btn" aria-label="Открыть список практик">
+        ☰ Практики
+      </button>
+    </div>
+  </div>
+
+  <div class="practices-layout">
+    <aside class="practices-sidebar" id="practices-sidebar" aria-label="Список практик">
+      <div class="practices-sidebar-header">
+        <input type="search" id="practices-search" class="notes-search-input" placeholder="🔍 Поиск по практикам..." autocomplete="off">
+      </div>
+      <nav class="practices-list" id="practices-list"></nav>
+    </aside>
+
+    <main class="practices-content">
+      <div class="practices-article-sheet" id="practices-article">
+        <p class="muted">Загружаем материалы практики…</p>
+      </div>
+    </main>
+  </div>
+
+  ${authModalHtml(site)}
+  <script src="../assets/katex/katex.min.js"></script>
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/practices.js"></script>
+</body>
+</html>
+`;
+}
+
+export function homeworksPage(homeworks = [], site = {}) {
+  const visible = (homeworks || []).filter((h) => h.is_published);
+  const clientData = JSON.stringify(homeworks.map((h) => ({
+    id: h.id,
+    order: h.order_index ?? h.order ?? 0,
+    topic: h.topic || "Общее",
+    title: h.title || h.id,
+    group_name: h.group_name || "all",
+    deadline: h.deadline || "",
+    max_score: h.max_score || 10,
+    is_published: Boolean(h.is_published),
+    content: h.content || "",
+    html: h.html || "",
+    created_at: h.created_at,
+    updated_at: h.updated_at,
+    submissions_count: h.submissions_count || 0,
+    user_submission: h.user_submission || null,
+  })));
+
+  const groupOptions = ["all", ...(site.groups || ["M3111", "M3112", "M3113", "M3114", "M3115"])]
+    .map((g) => `<option value="${esc(g)}">${g === "all" ? "Все группы" : esc(g)}</option>`)
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Домашние задания — Дискретная математика</title>
+  <link rel="stylesheet" href="../assets/katex/katex.min.css">
+  <link rel="stylesheet" href="../assets/style.css">
+  <script>window.__HOMEWORKS_DATA__ = ${clientData};</script>
+</head>
+<body class="homeworks-body-app platform-body">
+  ${navbarHtml("../", "homeworks", site)}
+
+  <div class="homeworks-subbar">
+    <div class="homeworks-subbar-title">
+      <span>📤 Домашние задания и сдача решений</span>
+    </div>
+    <div class="homeworks-subbar-controls">
+      <div class="group-filter-wrap">
+        <label for="homework-group-select" class="group-filter-label">Группа:</label>
+        <select id="homework-group-select" class="form-select form-select-sm">
+          ${groupOptions}
+        </select>
+      </div>
+      <button type="button" class="btn quiet btn-sm homeworks-mobile-menu-btn" id="homeworks-menu-btn" aria-label="Открыть список ДЗ">
+        ☰ Задания
+      </button>
+    </div>
+  </div>
+
+  <div class="homeworks-layout">
+    <aside class="homeworks-sidebar" id="homeworks-sidebar" aria-label="Список домашних заданий">
+      <div class="homeworks-sidebar-header">
+        <input type="search" id="homeworks-search" class="notes-search-input" placeholder="🔍 Поиск по заданиям..." autocomplete="off">
+      </div>
+      <div class="homeworks-cards-list" id="homeworks-cards-list"></div>
+    </aside>
+
+    <main class="homeworks-content">
+      <div class="homeworks-detail-sheet" id="homework-detail-sheet">
+        <p class="muted">Загружаем задание…</p>
+      </div>
+    </main>
+  </div>
+
+  ${authModalHtml(site)}
+  <script src="../assets/katex/katex.min.js"></script>
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/homeworks.js"></script>
+</body>
+</html>
+`;
+}
+
