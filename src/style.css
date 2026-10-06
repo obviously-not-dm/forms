@@ -38,6 +38,8 @@
   --shadow: 0 1px 2px rgba(22, 18, 44, 0.04), 0 6px 20px -8px rgba(22, 18, 44, 0.08);
   --shadow-lg: 0 2px 6px rgba(22, 18, 44, 0.06), 0 18px 48px -12px rgba(22, 18, 44, 0.22);
   --wide: 46rem;
+  --topbar-h: 56px;
+  --subbar-h: 52px;
 
   --body: "Onest", "DM Math", system-ui, sans-serif;
   --display: "Unbounded", "Onest", "DM Math", system-ui, sans-serif;
@@ -2680,6 +2682,20 @@ dialog::backdrop { background: rgba(12, 10, 24, 0.45); backdrop-filter: blur(3px
   box-shadow: var(--shadow-lg);
 }
 
+.note-admin-card .test-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.note-admin-card .test-card-actions .btn {
+  flex: 0 0 auto;
+}
+
 .doc-editor-topbar {
   display: flex;
   align-items: center;
@@ -4114,16 +4130,20 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   padding: 0;
+  height: var(--topbar-h, 56px);
+  box-sizing: border-box;
 }
 
 .topbar-inner {
   max-width: 78rem;
   margin: 0 auto;
-  padding: 0.65rem 1.25rem;
+  padding: 0 1.25rem;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  box-sizing: border-box;
 }
 
 .platform-logo {
@@ -5921,24 +5941,27 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
 .homeworks-subbar {
   background: var(--card);
   border-bottom: 1px solid var(--line);
-  padding: 0.65rem 1.5rem;
+  padding: 0 1.5rem;
+  height: var(--subbar-h, 52px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   position: sticky;
-  top: 56px;
+  top: var(--topbar-h, 56px);
   z-index: 85;
+  box-sizing: border-box;
 }
 
 .practices-subbar-title,
 .homeworks-subbar-title {
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.98rem;
   color: var(--ink);
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  white-space: nowrap;
 }
 
 .practices-subbar-controls,
@@ -5946,6 +5969,7 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-wrap: nowrap;
 }
 
 .group-filter-wrap {
@@ -5958,6 +5982,7 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .practices-mobile-menu-btn,
@@ -5967,23 +5992,28 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
 
 .practices-layout,
 .homeworks-layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  min-height: calc(100vh - 108px);
-  max-width: 1500px;
+  display: flex;
+  flex: 1;
+  width: 100%;
+  max-width: 96rem;
   margin: 0 auto;
+  align-items: stretch;
+  min-height: calc(100vh - var(--topbar-h, 56px) - var(--subbar-h, 52px));
 }
 
 .practices-sidebar,
 .homeworks-sidebar {
+  width: 21rem;
+  flex-shrink: 0;
   border-right: 1px solid var(--line);
   background: var(--sunken);
   overflow-y: auto;
   position: sticky;
-  top: 108px;
-  height: calc(100vh - 108px);
+  top: calc(var(--topbar-h, 56px) + var(--subbar-h, 52px));
+  height: calc(100vh - var(--topbar-h, 56px) - var(--subbar-h, 52px));
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .practices-sidebar-header,
@@ -5994,6 +6024,7 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   position: sticky;
   top: 0;
   z-index: 10;
+  box-sizing: border-box;
 }
 
 .practices-list,
@@ -6065,20 +6096,25 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
 
 .practices-content,
 .homeworks-content {
-  padding: 2rem 2.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 2.25rem 2.5rem;
   overflow-y: auto;
   background: var(--bg);
+  box-sizing: border-box;
 }
 
 .practices-article-sheet,
 .homeworks-detail-sheet {
-  max-width: 900px;
+  width: 100%;
+  max-width: 56rem;
   margin: 0 auto;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  padding: 2.25rem 2.5rem;
+  padding: 2.5rem 2.75rem;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
 }
 
 .practice-header,
@@ -6431,20 +6467,21 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
 @media (max-width: 900px) {
   .practices-layout,
   .homeworks-layout {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 
   .practices-sidebar,
   .homeworks-sidebar {
     position: fixed;
-    top: 108px;
+    top: calc(var(--topbar-h, 56px) + var(--subbar-h, 52px));
     left: 0;
     right: 0;
     bottom: 0;
     width: 100%;
-    height: calc(100vh - 108px);
-    z-index: 100;
+    height: calc(100vh - var(--topbar-h, 56px) - var(--subbar-h, 52px));
+    z-index: 95;
     display: none;
+    background: var(--card);
   }
 
   .practices-sidebar.open,
@@ -6455,11 +6492,13 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   .practices-mobile-menu-btn,
   .homeworks-mobile-menu-btn {
     display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
   }
 
   .practices-content,
   .homeworks-content {
-    padding: 1rem;
+    padding: 1.25rem 1rem;
   }
 
   .practices-article-sheet,

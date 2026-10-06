@@ -3,8 +3,19 @@ import { db } from "./db.js";
 
 const root = document.getElementById("app");
 let client;
-let currentTab = "tests"; // "tests" | "notes" | "colloquiums" | "stats"
+const initialParams = new URLSearchParams(window.location.search);
+let currentTab = initialParams.get("tab") || "tests"; // "tests" | "notes" | "colloquiums" | "practices" | "homeworks" | "contests" | "stats"
 let currentUser = null;
+
+function switchTab(tab) {
+  currentTab = tab;
+  try {
+    const url = new URL(window.location);
+    url.searchParams.set("tab", tab);
+    history.replaceState(null, "", url.toString());
+  } catch {}
+  renderAdmin();
+}
 
 function el(tag, attrs = {}, ...children) {
   const n = document.createElement(tag);
@@ -221,49 +232,49 @@ function renderAdmin() {
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "tests",
-      onclick: () => { currentTab = "tests"; renderAdmin(); },
+      onclick: () => switchTab("tests"),
     }, "📝 Тесты"),
     el("button", {
       class: `admin-nav-item ${currentTab === "notes" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "notes",
-      onclick: () => { currentTab = "notes"; renderAdmin(); },
+      onclick: () => switchTab("notes"),
     }, "📚 Конспекты и теория"),
     el("button", {
       class: `admin-nav-item ${currentTab === "colloquiums" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "colloquiums",
-      onclick: () => { currentTab = "colloquiums"; renderAdmin(); },
+      onclick: () => switchTab("colloquiums"),
     }, "🎓 Коллоквиумы"),
     el("button", {
       class: `admin-nav-item ${currentTab === "practices" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "practices",
-      onclick: () => { currentTab = "practices"; renderAdmin(); },
+      onclick: () => switchTab("practices"),
     }, "📝 Практики"),
     el("button", {
       class: `admin-nav-item ${currentTab === "homeworks" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "homeworks",
-      onclick: () => { currentTab = "homeworks"; renderAdmin(); },
+      onclick: () => switchTab("homeworks"),
     }, "📤 ДЗ и Проверка"),
     el("button", {
       class: `admin-nav-item ${currentTab === "contests" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "contests",
-      onclick: () => { currentTab = "contests"; renderAdmin(); },
+      onclick: () => switchTab("contests"),
     }, "⏱️ Онлайн-контесты"),
     el("button", {
       class: `admin-nav-item ${currentTab === "stats" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "stats",
-      onclick: () => { currentTab = "stats"; renderAdmin(); },
+      onclick: () => switchTab("stats"),
     }, "📊 Статистика"));
 
   const exitBtn = el("button", {
@@ -3688,150 +3699,371 @@ async function practicesTab(container) {
   container.replaceChildren(head, groupFilterContainer, grid);
 }
 
-function openPracticeEditor(practiceId, parentContainer) {
-  let dlg = document.getElementById("practice-editor-dialog");
-  if (!dlg) {
-    dlg = el("dialog", { class: "admin-preview-dialog", id: "practice-editor-dialog" });
-    document.body.append(dlg);
-  }
+async function openPracticeEditor(practiceId, container) {
+  container.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загружаем редактор практики…"));
+
+  let p = {
+    id: `practice-${Date.now()}`,
+    title: "",
+    topic: "Отношения",
+    group_name: "all",
+    order_index: 1,
+    is_published: 1,
+    content: "",
+  };
 
   const isNew = !practiceId;
-  dlg.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загрузка редактора…"));
-  dlg.showModal();
+  if (!isNew) {
+    try {
+      const res = await json(`/api/practices/${encodeURIComponent(practiceId)}`);
+      p = res.practice || p;
+    } catch (err) {
+      container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки практики: ${err.message}`));
+      return;
+    }
+  }
 
-  (async () => {
-    let p = {
-      id: `practice-${Date.now()}`,
-      title: "",
-      topic: "Отношения",
-      group_name: "all",
-      order_index: 1,
-      is_published: 1,
-      content: "",
-    };
+  let currentRawMd = p.content || "";
+  let viewMode = "split"; // "edit" | "split" | "preview"
+  let isDirty = false;
+  const draftKey = `practice_draft_${p.id}`;
 
-    if (!isNew) {
+  const saveStatus = el("span", { class: "save-msg", style: "font-size: 0.88rem;" }, "");
+
+  const markDirty = () => {
+    if (!isDirty) {
+      isDirty = true;
+      saveStatus.textContent = "● Не сохранено";
+      saveStatus.style.color = "var(--warn-ink, #b45309)";
+    }
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        content: currentRawMd,
+        title: titleInput.value,
+        topic: topicInput.value,
+        group_name: groupSelect.value,
+        order_index: orderInput.value,
+        is_published: pubCheckbox.checked ? 1 : 0,
+        time: Date.now(),
+      }));
+    } catch {}
+  };
+
+  const beforeUnloadHandler = (e) => {
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  };
+  window.addEventListener("beforeunload", beforeUnloadHandler);
+
+  const cleanupAndLeave = () => {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+    window.removeEventListener("keydown", keyHandler);
+    practicesTab(container);
+  };
+
+  // Верхняя навигация
+  const backBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    onclick: () => {
+      if (isDirty) {
+        const ok = confirm("У вас есть несохранённые изменения в практике.\n\nВы действительно хотите выйти без сохранения?");
+        if (!ok) return;
+      }
+      cleanupAndLeave();
+    },
+  }, "← Ко всем практикам");
+
+  const pubCheckbox = el("input", {
+    type: "checkbox",
+    checked: Boolean(p.is_published),
+    onchange: () => {
+      markDirty();
+      updatePubBtn();
+    },
+  });
+
+  const pubBtn = el("button", {
+    class: "btn btn-sm btn-visibility-toggle",
+    type: "button",
+    title: "Опубликовать / скрыть практику для студентов",
+    onclick: () => {
+      pubCheckbox.checked = !pubCheckbox.checked;
+      markDirty();
+      updatePubBtn();
+    },
+  });
+
+  function updatePubBtn() {
+    pubBtn.textContent = pubCheckbox.checked ? "✅ Выдано студентам" : "🔒 Черновик (скрыто)";
+    pubBtn.className = `btn btn-sm btn-visibility-toggle ${pubCheckbox.checked ? "is-visible" : "is-hidden"}`;
+  }
+  updatePubBtn();
+
+  const previewLink = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: () => openPreviewModal(`practices/?id=${encodeURIComponent(p.id)}`, titleInput.value || p.id),
+  }, "🔍 Предпросмотр");
+
+  const saveBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: async () => {
+      saveBtn.disabled = true;
+      saveStatus.textContent = "Сохранение…";
+      saveStatus.style.color = "var(--muted)";
       try {
-        const res = await json(`/api/practices/${encodeURIComponent(practiceId)}`);
-        p = res.practice || p;
+        const payload = {
+          id: p.id,
+          title: titleInput.value.trim() || p.id,
+          topic: topicInput.value.trim() || "Общее",
+          group_name: groupSelect.value,
+          order_index: parseInt(orderInput.value) || 1,
+          is_published: pubCheckbox.checked ? 1 : 0,
+          content: currentRawMd,
+        };
+
+        if (isNew) {
+          await json("/api/admin/practices", { method: "POST", body: payload });
+        } else {
+          await json(`/api/admin/practices/${encodeURIComponent(p.id)}`, { method: "PUT", body: payload });
+        }
+
+        isDirty = false;
+        try { localStorage.removeItem(draftKey); } catch {}
+        saveStatus.textContent = "✅ Сохранено";
+        saveStatus.style.color = "var(--ok)";
+        setTimeout(() => {
+          if (!isDirty) saveStatus.textContent = "";
+        }, 3000);
       } catch (err) {
-        alert("Ошибка загрузки практики: " + err.message);
-        dlg.close();
-        return;
+        saveStatus.textContent = `❌ Ошибка: ${err.message}`;
+        saveStatus.style.color = "var(--bad)";
+      } finally {
+        saveBtn.disabled = false;
       }
+    },
+  }, "💾 Сохранить");
+
+  // Переключатель режимов
+  const segEdit = el("button", {
+    class: "doc-seg-btn",
+    type: "button",
+    title: "Редактирование во всю ширину",
+    onclick: () => switchViewMode("edit"),
+  }, "✏️ Редактирование");
+
+  const segSplit = el("button", {
+    class: "doc-seg-btn active",
+    type: "button",
+    title: "Редактор слева + живой результат справа",
+    onclick: () => switchViewMode("split"),
+  }, "↔️ Сплит");
+
+  const segPreview = el("button", {
+    class: "doc-seg-btn",
+    type: "button",
+    title: "Вид готовой статьи",
+    onclick: () => switchViewMode("preview"),
+  }, "👁️ Предпросмотр");
+
+  const viewSegmented = el("div", { class: "doc-view-segmented" }, segEdit, segSplit, segPreview);
+
+  const topbar = el("div", { class: "doc-editor-topbar" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;" },
+      backBtn,
+      el("span", { class: "muted" }, "•"),
+      el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, isNew ? "Новая практика" : `Практика: ${p.title || p.id}`)),
+    el("div", { style: "display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;" },
+      viewSegmented,
+      saveStatus,
+      pubBtn,
+      previewLink,
+      saveBtn));
+
+  // Заголовок документа
+  const titleInput = el("input", {
+    class: "doc-title-input",
+    type: "text",
+    value: p.title || "",
+    placeholder: "Название практического занятия…",
+    oninput: markDirty,
+  });
+
+  // Метаданные
+  const topicInput = el("input", {
+    class: "doc-meta-input",
+    type: "text",
+    value: p.topic || "Отношения",
+    placeholder: "Тема (например: Отношения, Логика)",
+    style: "min-width: 14rem;",
+    oninput: markDirty,
+  });
+
+  const groupSelect = el("select", {
+    class: "doc-meta-input",
+    style: "min-width: 11rem;",
+    onchange: markDirty,
+  });
+  const groupsList = ["all", "M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
+  for (const g of groupsList) {
+    const opt = el("option", { value: g }, g === "all" ? "Все группы (all)" : g);
+    if (p.group_name === g) opt.selected = true;
+    groupSelect.append(opt);
+  }
+
+  const orderInput = el("input", {
+    class: "doc-meta-input",
+    type: "number",
+    value: String(p.order_index ?? p.order ?? 1),
+    placeholder: "№",
+    style: "width: 5rem;",
+    title: "Порядковый номер в курсе",
+    oninput: markDirty,
+  });
+
+  const metaBox = el("div", { class: "doc-meta-box" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;" },
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Тема:"),
+      topicInput,
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Для группы:"),
+      groupSelect,
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Порядок:"),
+      orderInput,
+      el("label", { style: "display: flex; align-items: center; gap: 0.4rem; cursor: pointer; white-space: nowrap; margin-left: auto;" },
+        pubCheckbox,
+        el("span", { class: "field-label", style: "margin: 0; font-size: 0.88rem;" }, "Выдано студентам"))));
+
+  // Текстовая область Markdown
+  const textarea = el("textarea", {
+    class: "doc-main-textarea",
+    rows: 24,
+    placeholder: "# Заголовок практики\n\n## 📝 Задачи к занятию\n\n### Задача 1\nУсловие задачи с формулой $x \\in A$.\n",
+    value: currentRawMd,
+    oninput: () => {
+      currentRawMd = textarea.value;
+      updateLivePreview();
+      markDirty();
+    },
+  });
+
+  const livePreview = el("div", { class: "doc-live-preview markdown-body" });
+
+  const updateLivePreview = () => {
+    livePreview.innerHTML = renderMarkdownPreview(currentRawMd);
+  };
+  updateLivePreview();
+
+  // Функция вставки для панели Word
+  const insertDocText = (before, after = "") => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const sel = textarea.value.substring(start, end);
+    const replacement = before + (sel || "") + after;
+    textarea.setRangeText(replacement, start, end, "select");
+    currentRawMd = textarea.value;
+    updateLivePreview();
+    markDirty();
+    textarea.focus();
+  };
+
+  // Панель инструментов
+  const headingSelect = el("select", {
+    class: "doc-select",
+    title: "Стиль текста",
+    onchange: (e) => {
+      const val = e.target.value;
+      if (val === "h1") insertDocText("# ", "\n");
+      else if (val === "h2") insertDocText("## ", "\n");
+      else if (val === "h3") insertDocText("### ", "\n");
+      e.target.value = "p";
+    },
+  },
+    el("option", { value: "p" }, "Обычный текст"),
+    el("option", { value: "h1" }, "Заголовок 1 (Раздел)"),
+    el("option", { value: "h2" }, "Заголовок 2 (Подраздел)"),
+    el("option", { value: "h3" }, "Заголовок 3 (Задача / Пункт)"));
+
+  const toolbar = el("div", { class: "doc-word-toolbar" },
+    el("div", { class: "doc-tool-group" }, headingSelect),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Полужирный (Ctrl+B)", onclick: () => insertDocText("**", "**") }, el("strong", {}, "Ж")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Курсив (Ctrl+I)", onclick: () => insertDocText("*", "*") }, el("em", {}, "К")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Подчёркнутый", onclick: () => insertDocText("<u>", "</u>") }, el("u", {}, "Ч")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Встроенный код", onclick: () => insertDocText("`", "`") }, "< >")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Маркированный список", onclick: () => insertDocText("- ") }, "• Список"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Нумерованный список", onclick: () => insertDocText("1. ") }, "1. Список"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Таблица", onclick: () => insertDocText("\n| Колонка 1 | Колонка 2 |\n| :--- | :--- |\n| Текст 1 | Текст 2 |\n") }, "▦ Таблица")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Формула в строке: $...$", onclick: () => insertDocText("$", "$") }, "∑ Формула"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Блок формулы: $$...$$", onclick: () => insertDocText("$$\n", "\n$$") }, "∫ Блок формулы"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Шаблон задачи", onclick: () => insertDocText("\n### 📝 Задача 1\nУсловие задачи...\n\n**Указание / Решение:**\n") }, "📋 Задача")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка примечания", onclick: () => insertDocText("> [!NOTE]\n> ") }, "ℹ️ Заметка"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка совета", onclick: () => insertDocText("> [!TIP]\n> ") }, "💡 Совет"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка важно", onclick: () => insertDocText("> [!IMPORTANT]\n> ") }, "📌 Важно"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Горизонтальный разделитель", onclick: () => insertDocText("\n---\n") }, "— Черта")));
+
+  const editorBodyContainer = el("div", { class: `doc-body-container mode-${viewMode}` },
+    textarea,
+    livePreview);
+
+  const switchViewMode = (mode) => {
+    viewMode = mode;
+    segEdit.classList.toggle("active", mode === "edit");
+    segSplit.classList.toggle("active", mode === "split");
+    segPreview.classList.toggle("active", mode === "preview");
+
+    editorBodyContainer.className = `doc-body-container mode-${mode}`;
+    toolbar.style.display = mode === "preview" ? "none" : "";
+    metaBox.style.display = mode === "preview" ? "none" : "";
+    titleInput.readOnly = mode === "preview";
+  };
+
+  // Горячая клавиша Ctrl+S / Cmd+S
+  const keyHandler = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveBtn.click();
     }
+  };
+  window.addEventListener("keydown", keyHandler);
 
-    const titleInput = el("input", { class: "form-input", type: "text", value: p.title || "", placeholder: "Название практики..." });
-    const topicInput = el("input", { class: "form-input", type: "text", value: p.topic || "Общее", placeholder: "Тема..." });
-    const orderInput = el("input", { class: "form-input", type: "number", value: p.order_index ?? p.order ?? 1, style: "width: 100px;" });
-    
-    const groupSelect = el("select", { class: "form-select" });
-    const groupsList = ["all", "M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
-    for (const g of groupsList) {
-      const opt = el("option", { value: g }, g === "all" ? "Все группы (all)" : g);
-      if (p.group_name === g) opt.selected = true;
-      groupSelect.append(opt);
-    }
-
-    const pubCheckbox = el("input", { type: "checkbox" });
-    pubCheckbox.checked = Boolean(p.is_published);
-
-    const textarea = el("textarea", {
-      class: "form-input",
-      style: "font-family: monospace; font-size: 0.95rem; min-height: 400px; width: 100%; resize: vertical; line-height: 1.5;",
-      placeholder: "# Заголовок практики\n\n## 📝 Задачи\n1. Задача 1...\n2. Задача 2...",
-    }, p.content || "");
-
-    const previewBox = el("div", {
-      class: "markdown-body",
-      style: "min-height: 400px; max-height: 500px; overflow-y: auto; padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);",
-    });
-
-    function updatePreview() {
-      const raw = textarea.value || "";
-      if (window.marked && window.marked.parse) {
-        previewBox.innerHTML = window.marked.parse(raw);
-        if (window.renderMathInElement) {
-          try {
-            window.renderMathInElement(previewBox, {
-              delimiters: [
-                { left: "$$", right: "$$", display: true },
-                { left: "$", right: "$", display: false },
-              ],
-              throwOnError: false,
-            });
-          } catch {}
-        }
-      } else {
-        previewBox.textContent = raw;
-      }
-    }
-
-    textarea.oninput = updatePreview;
-    updatePreview();
-
-    const saveBtn = el("button", {
-      class: "btn primary",
-      type: "button",
-      onclick: async () => {
-        saveBtn.disabled = true;
-        saveBtn.textContent = "Сохранение…";
+  const deleteBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    style: "color: var(--bad); margin-left: auto;",
+    onclick: async () => {
+      if (confirm(`Безвозвратно удалить практику «${titleInput.value || p.id}»?`)) {
         try {
-          const payload = {
-            id: p.id,
-            title: titleInput.value.trim() || p.id,
-            topic: topicInput.value.trim() || "Общее",
-            group_name: groupSelect.value,
-            order_index: parseInt(orderInput.value) || 1,
-            is_published: pubCheckbox.checked ? 1 : 0,
-            content: textarea.value,
-          };
-
-          if (isNew) {
-            await json("/api/admin/practices", { method: "POST", body: payload });
-          } else {
-            await json(`/api/admin/practices/${encodeURIComponent(p.id)}`, { method: "PUT", body: payload });
-          }
-
-          dlg.close();
-          practicesTab(parentContainer);
-        } catch (err) {
-          alert("Ошибка сохранения: " + err.message);
-          saveBtn.disabled = false;
-          saveBtn.textContent = "Сохранить";
+          await json(`/api/admin/practices/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+          cleanupAndLeave();
+        } catch (e) {
+          alert(`Ошибка удаления: ${e.message}`);
         }
-      },
-    }, "💾 Сохранить");
+      }
+    },
+  }, "🗑️ Удалить практику");
 
-    const contentGrid = el("div", { style: "display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;" },
-      el("div", {},
-        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Редактор Markdown:"),
-        textarea),
-      el("div", {},
-        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Живой предпросмотр (с формулами KaTeX):"),
-        previewBox)
-    );
+  const bottomActions = el("div", { class: "doc-editor-bottom-bar" },
+    saveBtn.cloneNode(true),
+    previewLink.cloneNode(true),
+    deleteBtn);
+  bottomActions.querySelector(".btn.primary").onclick = () => saveBtn.click();
+  bottomActions.querySelector("button:nth-child(2)").onclick = () => previewLink.click();
 
-    dlg.replaceChildren(
-      el("div", { style: "padding: 1.5rem; max-width: 1200px; width: 95vw; max-height: 90vh; overflow-y: auto;" },
-        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem;" },
-          el("h2", { style: "margin: 0; font-size: 1.35rem;" }, isNew ? "➕ Создание практики" : `✏️ Редактирование: ${p.title || p.id}`),
-          el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => dlg.close() }, "✕ Закрыть")),
-        el("div", { style: "display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;" },
-          el("label", {}, el("span", { class: "field-label" }, "Название практики:"), titleInput),
-          el("label", {}, el("span", { class: "field-label" }, "Тема:"), topicInput),
-          el("label", {}, el("span", { class: "field-label" }, "Для группы:"), groupSelect),
-          el("label", {}, el("span", { class: "field-label" }, "Порядковый номер:"), orderInput)),
-        el("label", { style: "display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;" },
-          pubCheckbox,
-          el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, "Выдано студентам (если галочка снята, практика сохранена как черновик)")),
-        contentGrid,
-        el("div", { style: "display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1rem;" },
-          el("button", { class: "btn quiet", type: "button", onclick: () => dlg.close() }, "Отмена"),
-          saveBtn)
-      )
-    );
-  })();
+  const docSheet = el("div", { class: "doc-paper-sheet" },
+    titleInput,
+    metaBox,
+    toolbar,
+    editorBodyContainer,
+    bottomActions);
+
+  container.replaceChildren(topbar, docSheet);
 }
 
 // ==========================================
@@ -3945,157 +4177,411 @@ async function homeworksTab(container) {
   container.replaceChildren(head, grid);
 }
 
-function openHomeworkEditor(hwId, parentContainer) {
-  let dlg = document.getElementById("homework-editor-dialog");
-  if (!dlg) {
-    dlg = el("dialog", { class: "admin-preview-dialog", id: "homework-editor-dialog" });
-    document.body.append(dlg);
-  }
+async function openHomeworkEditor(hwId, container) {
+  container.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загружаем редактор домашнего задания…"));
+
+  let h = {
+    id: `hw-${Date.now()}`,
+    title: "",
+    topic: "Отношения",
+    group_name: "all",
+    deadline: "",
+    max_score: 10,
+    order_index: 1,
+    is_published: 1,
+    content: "",
+  };
 
   const isNew = !hwId;
-  dlg.replaceChildren(el("p", { class: "muted", style: "padding: 2rem;" }, "Загрузка редактора…"));
-  dlg.showModal();
+  if (!isNew) {
+    try {
+      const res = await json(`/api/homeworks/${encodeURIComponent(hwId)}`);
+      h = res.homework || h;
+    } catch (err) {
+      container.replaceChildren(el("div", { class: "notice error" }, `Ошибка загрузки ДЗ: ${err.message}`));
+      return;
+    }
+  }
 
-  (async () => {
-    let h = {
-      id: `hw-${Date.now()}`,
-      title: "",
-      topic: "Отношения",
-      group_name: "all",
-      deadline: "",
-      max_score: 10,
-      order_index: 1,
-      is_published: 1,
-      content: "",
-    };
+  let currentRawMd = h.content || "";
+  let viewMode = "split"; // "edit" | "split" | "preview"
+  let isDirty = false;
+  const draftKey = `hw_draft_${h.id}`;
 
-    if (!isNew) {
+  const saveStatus = el("span", { class: "save-msg", style: "font-size: 0.88rem;" }, "");
+
+  const markDirty = () => {
+    if (!isDirty) {
+      isDirty = true;
+      saveStatus.textContent = "● Не сохранено";
+      saveStatus.style.color = "var(--warn-ink, #b45309)";
+    }
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({
+        content: currentRawMd,
+        title: titleInput.value,
+        topic: topicInput.value,
+        group_name: groupSelect.value,
+        deadline: deadlineInput.value,
+        max_score: maxScoreInput.value,
+        order_index: orderInput.value,
+        is_published: pubCheckbox.checked ? 1 : 0,
+        time: Date.now(),
+      }));
+    } catch {}
+  };
+
+  const beforeUnloadHandler = (e) => {
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  };
+  window.addEventListener("beforeunload", beforeUnloadHandler);
+
+  const cleanupAndLeave = () => {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+    window.removeEventListener("keydown", keyHandler);
+    homeworksTab(container);
+  };
+
+  // Верхняя навигация
+  const backBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    onclick: () => {
+      if (isDirty) {
+        const ok = confirm("У вас есть несохранённые изменения в ДЗ.\n\nВы действительно хотите выйти без сохранения?");
+        if (!ok) return;
+      }
+      cleanupAndLeave();
+    },
+  }, "← Ко всем заданиям");
+
+  const pubCheckbox = el("input", {
+    type: "checkbox",
+    checked: Boolean(h.is_published),
+    onchange: () => {
+      markDirty();
+      updatePubBtn();
+    },
+  });
+
+  const pubBtn = el("button", {
+    class: "btn btn-sm btn-visibility-toggle",
+    type: "button",
+    title: "Опубликовать / скрыть ДЗ для студентов",
+    onclick: () => {
+      pubCheckbox.checked = !pubCheckbox.checked;
+      markDirty();
+      updatePubBtn();
+    },
+  });
+
+  function updatePubBtn() {
+    pubBtn.textContent = pubCheckbox.checked ? "✅ Выдано студентам" : "🔒 Черновик (скрыто)";
+    pubBtn.className = `btn btn-sm btn-visibility-toggle ${pubCheckbox.checked ? "is-visible" : "is-hidden"}`;
+  }
+  updatePubBtn();
+
+  const previewLink = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: () => openPreviewModal(`homeworks/?id=${encodeURIComponent(h.id)}`, titleInput.value || h.id),
+  }, "🔍 Предпросмотр");
+
+  const subsCount = h.submissions_count || 0;
+  const reviewBtn = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: () => openHomeworkSubmissionsReview(h, container),
+  }, `👥 Работы (${subsCount})`);
+
+  const saveBtn = el("button", {
+    class: "btn primary",
+    type: "button",
+    onclick: async () => {
+      saveBtn.disabled = true;
+      saveStatus.textContent = "Сохранение…";
+      saveStatus.style.color = "var(--muted)";
       try {
-        const res = await json(`/api/homeworks/${encodeURIComponent(hwId)}`);
-        h = res.homework || h;
+        const payload = {
+          id: h.id,
+          title: titleInput.value.trim() || h.id,
+          topic: topicInput.value.trim() || "Общее",
+          group_name: groupSelect.value,
+          deadline: deadlineInput.value.trim(),
+          max_score: parseFloat(maxScoreInput.value) || 10,
+          order_index: parseInt(orderInput.value) || 1,
+          is_published: pubCheckbox.checked ? 1 : 0,
+          content: currentRawMd,
+        };
+
+        if (isNew) {
+          await json("/api/admin/homeworks", { method: "POST", body: payload });
+        } else {
+          await json(`/api/admin/homeworks/${encodeURIComponent(h.id)}`, { method: "PUT", body: payload });
+        }
+
+        isDirty = false;
+        try { localStorage.removeItem(draftKey); } catch {}
+        saveStatus.textContent = "✅ Сохранено";
+        saveStatus.style.color = "var(--ok)";
+        setTimeout(() => {
+          if (!isDirty) saveStatus.textContent = "";
+        }, 3000);
       } catch (err) {
-        alert("Ошибка загрузки ДЗ: " + err.message);
-        dlg.close();
-        return;
+        saveStatus.textContent = `❌ Ошибка: ${err.message}`;
+        saveStatus.style.color = "var(--bad)";
+      } finally {
+        saveBtn.disabled = false;
       }
+    },
+  }, "💾 Сохранить");
+
+  // Переключатель режимов
+  const segEdit = el("button", {
+    class: "doc-seg-btn",
+    type: "button",
+    title: "Редактирование во всю ширину",
+    onclick: () => switchViewMode("edit"),
+  }, "✏️ Редактирование");
+
+  const segSplit = el("button", {
+    class: "doc-seg-btn active",
+    type: "button",
+    title: "Редактор слева + живой результат справа",
+    onclick: () => switchViewMode("split"),
+  }, "↔️ Сплит");
+
+  const segPreview = el("button", {
+    class: "doc-seg-btn",
+    type: "button",
+    title: "Вид готовой статьи",
+    onclick: () => switchViewMode("preview"),
+  }, "👁️ Предпросмотр");
+
+  const viewSegmented = el("div", { class: "doc-view-segmented" }, segEdit, segSplit, segPreview);
+
+  const topbar = el("div", { class: "doc-editor-topbar" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;" },
+      backBtn,
+      el("span", { class: "muted" }, "•"),
+      el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, isNew ? "Новое ДЗ" : `ДЗ: ${h.title || h.id}`)),
+    el("div", { style: "display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;" },
+      viewSegmented,
+      saveStatus,
+      pubBtn,
+      reviewBtn,
+      previewLink,
+      saveBtn));
+
+  // Заголовок документа
+  const titleInput = el("input", {
+    class: "doc-title-input",
+    type: "text",
+    value: h.title || "",
+    placeholder: "Название домашнего задания…",
+    oninput: markDirty,
+  });
+
+  // Метаданные
+  const topicInput = el("input", {
+    class: "doc-meta-input",
+    type: "text",
+    value: h.topic || "Отношения",
+    placeholder: "Тема (например: Отношения, Логика)",
+    style: "min-width: 12rem;",
+    oninput: markDirty,
+  });
+
+  const groupSelect = el("select", {
+    class: "doc-meta-input",
+    style: "min-width: 10rem;",
+    onchange: markDirty,
+  });
+  const groupsList = ["all", "M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
+  for (const g of groupsList) {
+    const opt = el("option", { value: g }, g === "all" ? "Все группы (all)" : g);
+    if (h.group_name === g) opt.selected = true;
+    groupSelect.append(opt);
+  }
+
+  const deadlineInput = el("input", {
+    class: "doc-meta-input",
+    type: "text",
+    value: h.deadline || "",
+    placeholder: "2026-10-25 23:59",
+    title: "Дедлайн сдачи (дата и время)",
+    style: "width: 11rem;",
+    oninput: markDirty,
+  });
+
+  const maxScoreInput = el("input", {
+    class: "doc-meta-input",
+    type: "number",
+    step: "0.5",
+    value: String(h.max_score ?? 10),
+    title: "Максимальный балл",
+    style: "width: 5.5rem;",
+    oninput: markDirty,
+  });
+
+  const orderInput = el("input", {
+    class: "doc-meta-input",
+    type: "number",
+    value: String(h.order_index ?? h.order ?? 1),
+    placeholder: "№",
+    style: "width: 4.5rem;",
+    title: "Порядковый номер в курсе",
+    oninput: markDirty,
+  });
+
+  const metaBox = el("div", { class: "doc-meta-box" },
+    el("div", { style: "display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;" },
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Тема:"),
+      topicInput,
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Группа:"),
+      groupSelect,
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Дедлайн:"),
+      deadlineInput,
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Макс. балл:"),
+      maxScoreInput,
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, "Порядок:"),
+      orderInput,
+      el("label", { style: "display: flex; align-items: center; gap: 0.4rem; cursor: pointer; white-space: nowrap; margin-left: auto;" },
+        pubCheckbox,
+        el("span", { class: "field-label", style: "margin: 0; font-size: 0.88rem;" }, "Выдано студентам"))));
+
+  // Текстовая область Markdown
+  const textarea = el("textarea", {
+    class: "doc-main-textarea",
+    rows: 24,
+    placeholder: "# Домашнее задание\n\n## 📝 Задачи\n\n### Задача 1 (4 балла)\nУсловие задачи с формулой $x \\in A$.\n",
+    value: currentRawMd,
+    oninput: () => {
+      currentRawMd = textarea.value;
+      updateLivePreview();
+      markDirty();
+    },
+  });
+
+  const livePreview = el("div", { class: "doc-live-preview markdown-body" });
+
+  const updateLivePreview = () => {
+    livePreview.innerHTML = renderMarkdownPreview(currentRawMd);
+  };
+  updateLivePreview();
+
+  // Функция вставки для панели Word
+  const insertDocText = (before, after = "") => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const sel = textarea.value.substring(start, end);
+    const replacement = before + (sel || "") + after;
+    textarea.setRangeText(replacement, start, end, "select");
+    currentRawMd = textarea.value;
+    updateLivePreview();
+    markDirty();
+    textarea.focus();
+  };
+
+  // Панель инструментов
+  const headingSelect = el("select", {
+    class: "doc-select",
+    title: "Стиль текста",
+    onchange: (e) => {
+      const val = e.target.value;
+      if (val === "h1") insertDocText("# ", "\n");
+      else if (val === "h2") insertDocText("## ", "\n");
+      else if (val === "h3") insertDocText("### ", "\n");
+      e.target.value = "p";
+    },
+  },
+    el("option", { value: "p" }, "Обычный текст"),
+    el("option", { value: "h1" }, "Заголовок 1 (Раздел)"),
+    el("option", { value: "h2" }, "Заголовок 2 (Подраздел)"),
+    el("option", { value: "h3" }, "Заголовок 3 (Задача / Пункт)"));
+
+  const toolbar = el("div", { class: "doc-word-toolbar" },
+    el("div", { class: "doc-tool-group" }, headingSelect),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Полужирный (Ctrl+B)", onclick: () => insertDocText("**", "**") }, el("strong", {}, "Ж")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Курсив (Ctrl+I)", onclick: () => insertDocText("*", "*") }, el("em", {}, "К")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Подчёркнутый", onclick: () => insertDocText("<u>", "</u>") }, el("u", {}, "Ч")),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Встроенный код", onclick: () => insertDocText("`", "`") }, "< >")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Маркированный список", onclick: () => insertDocText("- ") }, "• Список"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Нумерованный список", onclick: () => insertDocText("1. ") }, "1. Список"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Таблица", onclick: () => insertDocText("\n| Колонка 1 | Колонка 2 |\n| :--- | :--- |\n| Текст 1 | Текст 2 |\n") }, "▦ Таблица")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Формула в строке: $...$", onclick: () => insertDocText("$", "$") }, "∑ Формула"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Блок формулы: $$...$$", onclick: () => insertDocText("$$\n", "\n$$") }, "∫ Блок формулы"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Шаблон задачи", onclick: () => insertDocText("\n### 📝 Задача 1 (5 баллов)\nУсловие задачи...\n") }, "📋 Задача")),
+    el("div", { class: "doc-tool-group" },
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка примечания", onclick: () => insertDocText("> [!NOTE]\n> ") }, "ℹ️ Заметка"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка совета", onclick: () => insertDocText("> [!TIP]\n> ") }, "💡 Совет"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Вставка важно", onclick: () => insertDocText("> [!IMPORTANT]\n> ") }, "📌 Важно"),
+      el("button", { class: "doc-tool-btn", type: "button", title: "Горизонтальный разделитель", onclick: () => insertDocText("\n---\n") }, "— Черта")));
+
+  const editorBodyContainer = el("div", { class: `doc-body-container mode-${viewMode}` },
+    textarea,
+    livePreview);
+
+  const switchViewMode = (mode) => {
+    viewMode = mode;
+    segEdit.classList.toggle("active", mode === "edit");
+    segSplit.classList.toggle("active", mode === "split");
+    segPreview.classList.toggle("active", mode === "preview");
+
+    editorBodyContainer.className = `doc-body-container mode-${mode}`;
+    toolbar.style.display = mode === "preview" ? "none" : "";
+    metaBox.style.display = mode === "preview" ? "none" : "";
+    titleInput.readOnly = mode === "preview";
+  };
+
+  // Горячая клавиша Ctrl+S / Cmd+S
+  const keyHandler = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveBtn.click();
     }
+  };
+  window.addEventListener("keydown", keyHandler);
 
-    const titleInput = el("input", { class: "form-input", type: "text", value: h.title || "", placeholder: "Название ДЗ..." });
-    const topicInput = el("input", { class: "form-input", type: "text", value: h.topic || "Общее", placeholder: "Тема..." });
-    const deadlineInput = el("input", { class: "form-input", type: "text", value: h.deadline || "", placeholder: "2026-10-25 23:59" });
-    const maxScoreInput = el("input", { class: "form-input", type: "number", value: h.max_score || 10, style: "width: 100px;" });
-    const orderInput = el("input", { class: "form-input", type: "number", value: h.order_index ?? h.order ?? 1, style: "width: 80px;" });
-
-    const groupSelect = el("select", { class: "form-select" });
-    const groupsList = ["all", "M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
-    for (const g of groupsList) {
-      const opt = el("option", { value: g }, g === "all" ? "Все группы (all)" : g);
-      if (h.group_name === g) opt.selected = true;
-      groupSelect.append(opt);
-    }
-
-    const pubCheckbox = el("input", { type: "checkbox" });
-    pubCheckbox.checked = Boolean(h.is_published);
-
-    const textarea = el("textarea", {
-      class: "form-input",
-      style: "font-family: monospace; font-size: 0.95rem; min-height: 380px; width: 100%; resize: vertical; line-height: 1.5;",
-      placeholder: "# Домашнее задание\n\n### Задачи\n1. Задача 1...\n2. Задача 2...",
-    }, h.content || "");
-
-    const previewBox = el("div", {
-      class: "markdown-body",
-      style: "min-height: 380px; max-height: 480px; overflow-y: auto; padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);",
-    });
-
-    function updatePreview() {
-      const raw = textarea.value || "";
-      if (window.marked && window.marked.parse) {
-        previewBox.innerHTML = window.marked.parse(raw);
-        if (window.renderMathInElement) {
-          try {
-            window.renderMathInElement(previewBox, {
-              delimiters: [
-                { left: "$$", right: "$$", display: true },
-                { left: "$", right: "$", display: false },
-              ],
-              throwOnError: false,
-            });
-          } catch {}
-        }
-      } else {
-        previewBox.textContent = raw;
-      }
-    }
-
-    textarea.oninput = updatePreview;
-    updatePreview();
-
-    const saveBtn = el("button", {
-      class: "btn primary",
-      type: "button",
-      onclick: async () => {
-        saveBtn.disabled = true;
-        saveBtn.textContent = "Сохранение…";
+  const deleteBtn = el("button", {
+    class: "btn quiet",
+    type: "button",
+    style: "color: var(--bad); margin-left: auto;",
+    onclick: async () => {
+      if (confirm(`Безвозвратно удалить ДЗ «${titleInput.value || h.id}»?`)) {
         try {
-          const payload = {
-            id: h.id,
-            title: titleInput.value.trim() || h.id,
-            topic: topicInput.value.trim() || "Общее",
-            group_name: groupSelect.value,
-            deadline: deadlineInput.value.trim(),
-            max_score: parseFloat(maxScoreInput.value) || 10,
-            order_index: parseInt(orderInput.value) || 1,
-            is_published: pubCheckbox.checked ? 1 : 0,
-            content: textarea.value,
-          };
-
-          if (isNew) {
-            await json("/api/admin/homeworks", { method: "POST", body: payload });
-          } else {
-            await json(`/api/admin/homeworks/${encodeURIComponent(h.id)}`, { method: "PUT", body: payload });
-          }
-
-          dlg.close();
-          homeworksTab(parentContainer);
-        } catch (err) {
-          alert("Ошибка сохранения: " + err.message);
-          saveBtn.disabled = false;
-          saveBtn.textContent = "Сохранить";
+          await json(`/api/admin/homeworks/${encodeURIComponent(h.id)}`, { method: "DELETE" });
+          cleanupAndLeave();
+        } catch (e) {
+          alert(`Ошибка удаления: ${e.message}`);
         }
-      },
-    }, "💾 Сохранить");
+      }
+    },
+  }, "🗑️ Удалить задание");
 
-    const contentGrid = el("div", { style: "display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;" },
-      el("div", {},
-        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Условия задач (Markdown):"),
-        textarea),
-      el("div", {},
-        el("div", { style: "font-weight: 600; margin-bottom: 0.4rem; font-size: 0.9rem;" }, "Предпросмотр (с формулами KaTeX):"),
-        previewBox)
-    );
+  const bottomActions = el("div", { class: "doc-editor-bottom-bar" },
+    saveBtn.cloneNode(true),
+    reviewBtn.cloneNode(true),
+    previewLink.cloneNode(true),
+    deleteBtn);
+  bottomActions.querySelector(".btn.primary").onclick = () => saveBtn.click();
+  bottomActions.querySelector("button:nth-child(2)").onclick = () => reviewBtn.click();
+  bottomActions.querySelector("button:nth-child(3)").onclick = () => previewLink.click();
 
-    dlg.replaceChildren(
-      el("div", { style: "padding: 1.5rem; max-width: 1200px; width: 95vw; max-height: 90vh; overflow-y: auto;" },
-        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem;" },
-          el("h2", { style: "margin: 0; font-size: 1.35rem;" }, isNew ? "➕ Создание домашнего задания" : `✏️ Редактирование: ${h.title || h.id}`),
-          el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => dlg.close() }, "✕ Закрыть")),
-        el("div", { style: "display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr; gap: 0.85rem; margin-bottom: 1rem;" },
-          el("label", {}, el("span", { class: "field-label" }, "Название:"), titleInput),
-          el("label", {}, el("span", { class: "field-label" }, "Тема:"), topicInput),
-          el("label", {}, el("span", { class: "field-label" }, "Группа:"), groupSelect),
-          el("label", {}, el("span", { class: "field-label" }, "Дедлайн (дата и время):"), deadlineInput),
-          el("label", {}, el("span", { class: "field-label" }, "Макс. балл:"), maxScoreInput)),
-        el("label", { style: "display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;" },
-          pubCheckbox,
-          el("span", { style: "font-weight: 600; font-size: 0.95rem;" }, "Выдано студентам (активно для сдачи)")),
-        contentGrid,
-        el("div", { style: "display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1rem;" },
-          el("button", { class: "btn quiet", type: "button", onclick: () => dlg.close() }, "Отмена"),
-          saveBtn)
-      )
-    );
-  })();
+  const docSheet = el("div", { class: "doc-paper-sheet" },
+    titleInput,
+    metaBox,
+    toolbar,
+    editorBodyContainer,
+    bottomActions);
+
+  container.replaceChildren(topbar, docSheet);
 }
 
 function openHomeworkSubmissionsReview(hw, parentContainer) {

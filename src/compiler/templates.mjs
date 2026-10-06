@@ -1172,6 +1172,7 @@ export function adminPage(site = {}) {
 </header>
 <main class="sheet" id="app"><p class="muted">Загружаем…</p></main>
 <script src="assets/katex/katex.min.js"></script>
+<script src="assets/katex/auto-render.min.js"></script>
 <script src="assets/marked.min.js"></script>
 <script type="module" src="js/admin.js"></script>
 </body>
@@ -1245,6 +1246,8 @@ export function practicesPage(practices = [], site = {}) {
 
   ${authModalHtml(site)}
   <script src="../assets/katex/katex.min.js"></script>
+  <script src="../assets/katex/auto-render.min.js"></script>
+  <script src="../assets/marked.min.js"></script>
   <script type="module" src="../js/platform.js"></script>
   <script type="module" src="../js/practices.js"></script>
 </body>
@@ -1322,6 +1325,8 @@ export function homeworksPage(homeworks = [], site = {}) {
 
   ${authModalHtml(site)}
   <script src="../assets/katex/katex.min.js"></script>
+  <script src="../assets/katex/auto-render.min.js"></script>
+  <script src="../assets/marked.min.js"></script>
   <script type="module" src="../js/platform.js"></script>
   <script type="module" src="../js/homeworks.js"></script>
 </body>

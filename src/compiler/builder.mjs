@@ -503,6 +503,10 @@ export function build() {
   fs.mkdirSync(path.join(DIST, "assets", "katex", "fonts"), { recursive: true });
   fs.copyFileSync(path.join(kx, "katex.min.css"), path.join(DIST, "assets", "katex", "katex.min.css"));
   fs.copyFileSync(path.join(kx, "katex.min.js"), path.join(DIST, "assets", "katex", "katex.min.js"));
+  const autoRenderSrc = path.join(kx, "contrib", "auto-render.min.js");
+  if (fs.existsSync(autoRenderSrc)) {
+    fs.copyFileSync(autoRenderSrc, path.join(DIST, "assets", "katex", "auto-render.min.js"));
+  }
   for (const f of fs.readdirSync(path.join(kx, "fonts")).filter((f) => f.endsWith(".woff2"))) {
     fs.copyFileSync(path.join(kx, "fonts", f), path.join(DIST, "assets", "katex", "fonts", f));
   }

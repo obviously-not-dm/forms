@@ -506,10 +506,96 @@ class HomeworksApp {
   }
 
   renderFallbackMd(md) {
-    if (window.marked && window.marked.parse) {
-      return window.marked.parse(md);
+    let text = String(md || "");
+    const mathMap = new Map();
+    let mathCounter = 0;
+
+    // Preserve block formulas $$...$$
+    text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+      const key = `%%MATH_BLOCK_${mathCounter++}%%`;
+      let rendered = `<div class="katex-display">$$${tex}$$</div>`;
+      if (window.katex) {
+        try {
+          rendered = `<div class="katex-display">${window.katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false })}</div>`;
+        } catch {}
+      }
+      mathMap.set(key, rendered);
+      return key;
+    });
+
+    // Preserve inline formulas $...$
+    text = text.replace(/(?<!\\)\$([^\n$]+?)(?<!\\)\$/g, (_, tex) => {
+      const key = `%%MATH_INLINE_${mathCounter++}%%`;
+      let rendered = `<code>$${tex}$</code>`;
+      if (window.katex) {
+        try {
+          rendered = window.katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
+        } catch {}
+      }
+      mathMap.set(key, rendered);
+      return key;
+    });
+
+    // Callout blocks
+    const calloutMap = new Map();
+    let calloutCounter = 0;
+    const icons = { note: "ℹ️", tip: "💡", important: "📌", warning: "⚠️", caution: "🛑" };
+    const titles = { note: "Заметка", tip: "Совет", important: "Важно", warning: "Внимание", caution: "Осторожно" };
+
+    text = text.replace(/(?:^|\n)([ \t]*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][^\n]*(?:\n[^\n]+)*)/gi, (m, block) => {
+      const lines = block.split("\n");
+      const quoted = lines.map((line) => {
+        const trimmed = line.trimStart();
+        if (trimmed.startsWith(">")) return line;
+        return "> " + line;
+      }).join("\n");
+      return "\n" + quoted;
+    });
+
+    text = text.replace(/^>[ \t]*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][^\n]*(?:\n(?:>[^\n]*(?:\n|$))*|$)/gim, (fullMatch) => {
+      const lines = fullMatch.split("\n");
+      const firstLine = lines[0] || "";
+      const typeMatch = firstLine.match(/\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
+      const type = typeMatch ? typeMatch[1].toLowerCase() : "note";
+      const headerExtra = firstLine.replace(/^>[ \t]*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i, "").trim();
+
+      const bodyLines = [];
+      if (headerExtra) bodyLines.push(headerExtra);
+      for (let i = 1; i < lines.length; i++) {
+        const l = lines[i];
+        if (/^>[ \t]?/.test(l)) {
+          bodyLines.push(l.replace(/^>[ \t]?/, ""));
+        } else if (l.trim()) {
+          bodyLines.push(l);
+        }
+      }
+      const cleanBody = bodyLines.join("\n").trim();
+      const bodyHtml = window.marked && window.marked.parse
+        ? (typeof window.marked.parse === "function" ? window.marked.parse(cleanBody) : window.marked(cleanBody))
+        : `<p>${this.esc(cleanBody).replace(/\n/g, "<br>")}</p>`;
+      const calloutHtml = `<div class="note-callout callout-${type}">\n  <div class="callout-header"><span class="callout-icon">${icons[type] || "ℹ️"}</span> <span class="callout-title">${titles[type] || type}</span></div>\n  <div class="callout-body">\n${bodyHtml}\n  </div>\n</div>`;
+
+      const key = `%%CALLOUT_BLOCK_${calloutCounter++}%%`;
+      calloutMap.set(key, calloutHtml);
+      return `\n\n${key}\n\n`;
+    });
+
+    let html = "";
+    if (window.marked) {
+      const parseFn = typeof window.marked.parse === "function" ? window.marked.parse : window.marked;
+      html = parseFn(text, { gfm: true, breaks: true });
+    } else {
+      html = text.split(/\n{2,}/).map(p => `<p>${this.esc(p.trim()).replace(/\n/g, "<br>")}</p>`).join("\n");
     }
-    return `<pre style="white-space: pre-wrap;">${this.esc(md)}</pre>`;
+
+    for (const [key, val] of calloutMap.entries()) {
+      html = html.replace(new RegExp(`<p>\\s*${key}\\s*<\\/p>|${key}`, "g"), val);
+    }
+
+    for (const [key, val] of mathMap.entries()) {
+      html = html.split(key).join(val);
+    }
+    return html;
   }
 
   esc(s) {

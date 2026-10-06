@@ -56,6 +56,7 @@ import {
 } from "./db.mjs";
 import { saveUploadedPdf, getPdfFilePath, isValidPdf } from "./storage.mjs";
 import { serializeTest, parseTest, serializeNote, parseNote, build } from "../compiler/builder.mjs";
+import { renderMarkdown } from "../compiler/markdown.mjs";
 import { grade } from "../grade.js";
 
 const CONTENT = path.resolve("content");
@@ -1022,7 +1023,10 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       const targetGroup = groupParam || (!isTeacher ? studentGroup : null);
       const includeUnpublished = isTeacher && parsedUrl.searchParams.get("all") === "1";
 
-      const practices = getAllPractices({ group: targetGroup, includeUnpublished: isTeacher });
+      const practices = getAllPractices({ group: targetGroup, includeUnpublished: isTeacher }).map((p) => ({
+        ...p,
+        html: renderMarkdown(p.content || "").html,
+      }));
       return sendJson(res, 200, { practices });
     }
 
@@ -1031,7 +1035,12 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       const practiceId = decodeURIComponent(practiceItemMatch[1]).trim();
       const practice = getPracticeById(practiceId);
       if (!practice) return sendJson(res, 404, { error: "Практика не найдена" });
-      return sendJson(res, 200, { practice });
+      return sendJson(res, 200, {
+        practice: {
+          ...practice,
+          html: renderMarkdown(practice.content || "").html,
+        },
+      });
     }
 
     if (normPath === "/api/admin/practices" && method === "POST") {
@@ -1079,7 +1088,10 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       const targetGroup = groupParam || (!isTeacher ? studentGroup : null);
       const userId = sess?.userId || sess?.userObj?.id || null;
 
-      const homeworks = getAllHomeworks({ group: targetGroup, includeUnpublished: isTeacher, userId });
+      const homeworks = getAllHomeworks({ group: targetGroup, includeUnpublished: isTeacher, userId }).map((h) => ({
+        ...h,
+        html: renderMarkdown(h.content || "").html,
+      }));
       return sendJson(res, 200, { homeworks });
     }
 
@@ -1090,7 +1102,12 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       const userId = sess?.userId || sess?.userObj?.id || null;
       const homework = getHomeworkById(hwId, userId);
       if (!homework) return sendJson(res, 404, { error: "Домашнее задание не найдено" });
-      return sendJson(res, 200, { homework });
+      return sendJson(res, 200, {
+        homework: {
+          ...homework,
+          html: renderMarkdown(homework.content || "").html,
+        },
+      });
     }
 
     if (normPath === "/api/admin/homeworks" && method === "POST") {
