@@ -278,6 +278,57 @@ class DMPlatform {
         }
       };
     }
+
+    // Password Reset Form Submit
+    const resetForm = document.getElementById("auth-reset-form");
+    if (resetForm) {
+      resetForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("reset-email")?.value.trim();
+        const password = document.getElementById("reset-password")?.value;
+        const errEl = document.getElementById("reset-error");
+        const succEl = document.getElementById("reset-success");
+        if (errEl) errEl.hidden = true;
+        if (succEl) succEl.hidden = true;
+
+        try {
+          const res = await fetch("/api/auth/reset-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ email, new_password: password }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            if (errEl) {
+              errEl.textContent = data.error || "Ошибка сброса пароля";
+              errEl.hidden = false;
+            }
+            return;
+          }
+          if (succEl) {
+            succEl.textContent = "Пароль успешно обновлён! Вход в систему...";
+            succEl.hidden = false;
+          }
+          setTimeout(() => {
+            this.closeModal();
+            window.location.reload();
+          }, 800);
+        } catch (err) {
+          if (errEl) {
+            errEl.textContent = "Ошибка сети при сбросе пароля";
+            errEl.hidden = false;
+          }
+        }
+      };
+    }
+
+    const forgotLink = document.getElementById("link-forgot-password");
+    if (forgotLink) {
+      forgotLink.onclick = () => {
+        this.switchAuthTab("reset");
+      };
+    }
   }
 
   openModal(tab = "login") {
@@ -300,9 +351,11 @@ class DMPlatform {
     });
     const loginForm = document.getElementById("auth-login-form");
     const regForm = document.getElementById("auth-register-form");
+    const resetForm = document.getElementById("auth-reset-form");
     const teacherForm = document.getElementById("auth-teacher-form");
     if (loginForm) loginForm.hidden = tab !== "login";
     if (regForm) regForm.hidden = tab !== "register";
+    if (resetForm) resetForm.hidden = tab !== "reset";
     if (teacherForm) teacherForm.hidden = tab !== "teacher";
   }
 

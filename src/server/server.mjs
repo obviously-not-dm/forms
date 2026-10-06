@@ -78,9 +78,22 @@ export function serve(options = {}) {
     const ext = path.extname(file).toLowerCase();
     const contentType = TYPES[ext] || "application/octet-stream";
 
+    // Кэширование статики:
+    // Шрифты и картинки неизменяемы — кэшируем надолго (1 год)
+    // CSS и JS — кэшируем на 1 час с проверкой
+    // HTML — no-cache для мгновенного обновления контента без мигания стилей
+    let cacheControl = "no-cache";
+    if (ext === ".woff2" || ext === ".woff" || ext === ".ttf") {
+      cacheControl = "public, max-age=31536000, immutable";
+    } else if (ext === ".css" || ext === ".js") {
+      cacheControl = "public, max-age=3600, stale-while-revalidate=86400";
+    } else if (ext === ".png" || ext === ".jpg" || ext === ".svg" || ext === ".webp" || ext === ".ico") {
+      cacheControl = "public, max-age=86400";
+    }
+
     res.writeHead(200, {
       "Content-Type": contentType,
-      "Cache-Control": "no-store",
+      "Cache-Control": cacheControl,
     });
 
     fs.createReadStream(file).pipe(res);

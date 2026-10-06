@@ -29,8 +29,8 @@
   --on-accent: #ffffff;
   --ok: #17804c;
   --ok-soft: #e4f5eb;
-  --bad: #c2321f;
-  --bad-soft: #fdece9;
+  --bad: #d93829;
+  --bad-soft: rgba(217, 56, 41, 0.08);
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius: 14px;
@@ -126,6 +126,11 @@ h2 {
 /* ---------- кнопки и поля ---------- */
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
   font: inherit;
   font-weight: 500;
   border-radius: 999px;
@@ -141,6 +146,11 @@ h2 {
 .btn.primary:disabled { opacity: 0.55; cursor: default; box-shadow: none; }
 .btn.quiet { background: var(--card); color: var(--ink); border-color: var(--line); padding: 0.45rem 0.95rem; font-size: 0.9rem; }
 .btn.quiet:hover { border-color: var(--line-strong); background: var(--sunken); }
+.btn-sm {
+  padding: 0.38rem 0.85rem;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
 
 .field-label { display: block; font-weight: 600; font-size: 0.92rem; margin-bottom: 0.5rem; }
 .field-error { display: block; color: var(--bad); font-size: 0.88rem; margin-top: 0.45rem; }
@@ -445,10 +455,10 @@ img.photo { background: #fff; }
 
 .q.locked .opt.key { border-color: var(--ok); background: var(--ok-soft); }
 .q.locked .opt.key .badge { background: var(--ok); border-color: var(--ok); color: var(--card); }
-.q.locked .opt.miss { border-color: var(--bad); background: var(--bad-soft); }
-.q.locked .opt.miss .badge { background: var(--bad); border-color: var(--bad); color: var(--card); }
+.q.locked .opt.miss { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); background: var(--bad-soft); }
+.q.locked .opt.miss .badge { background: var(--bad); border-color: var(--bad); color: var(--card); opacity: 0.85; }
 .text-input.right { border-color: var(--ok); background: var(--ok-soft); }
-.text-input.wrong { border-color: var(--bad); background: var(--bad-soft); }
+.text-input.wrong { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); background: var(--bad-soft); }
 
 .explanation {
   background: var(--sunken);
@@ -5917,7 +5927,7 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   justify-content: space-between;
   gap: 1rem;
   position: sticky;
-  top: 52px;
+  top: 56px;
   z-index: 85;
 }
 
@@ -5959,7 +5969,7 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
 .homeworks-layout {
   display: grid;
   grid-template-columns: 320px 1fr;
-  min-height: calc(100vh - 100px);
+  min-height: calc(100vh - 108px);
   max-width: 1500px;
   margin: 0 auto;
 }
@@ -5970,8 +5980,8 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   background: var(--sunken);
   overflow-y: auto;
   position: sticky;
-  top: 100px;
-  height: calc(100vh - 100px);
+  top: 108px;
+  height: calc(100vh - 108px);
   display: flex;
   flex-direction: column;
 }
@@ -6427,12 +6437,12 @@ button, input, select, textarea, a, .opt, .col-pill-btn, .home-tab-btn, .btn-vis
   .practices-sidebar,
   .homeworks-sidebar {
     position: fixed;
-    top: 104px;
+    top: 108px;
     left: 0;
     right: 0;
     bottom: 0;
     width: 100%;
-    height: calc(100vh - 104px);
+    height: calc(100vh - 108px);
     z-index: 100;
     display: none;
   }

@@ -20,6 +20,7 @@ export function head(title, rel, extra = "", math = false) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
 <link rel="preload" href="${rel}assets/fonts/onest-cyrillic-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="${rel}assets/fonts/onest-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 ${math ? `<link rel="stylesheet" href="${rel}assets/katex/katex.min.css">\n` : ""}<link rel="stylesheet" href="${rel}assets/style.css">
 ${extra}</head>`;
 }
@@ -69,6 +70,7 @@ export function authModalHtml(site = {}) {
       <div class="auth-tabs" role="tablist">
         <button type="button" class="auth-tab-btn active" data-tab="login" role="tab">Вход</button>
         <button type="button" class="auth-tab-btn" data-tab="register" role="tab">Регистрация</button>
+        <button type="button" class="auth-tab-btn" data-tab="reset" role="tab">Сброс пароля</button>
         <button type="button" class="auth-tab-btn" data-tab="teacher" role="tab">Преподаватель</button>
       </div>
       <button type="button" class="btn quiet btn-sm auth-close-btn" data-auth-close aria-label="Закрыть">✕</button>
@@ -82,11 +84,30 @@ export function authModalHtml(site = {}) {
           <input type="text" id="login-email" class="form-input" placeholder="student@itmo.ru" required autocomplete="username">
         </div>
         <div class="form-group">
-          <label class="form-label" for="login-password">Пароль</label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <label class="form-label" for="login-password" style="margin-bottom: 0;">Пароль</label>
+            <button type="button" class="btn-link" id="link-forgot-password" style="background: none; border: none; padding: 0; color: var(--accent); font-size: 0.8rem; cursor: pointer;">Забыли пароль?</button>
+          </div>
           <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
         </div>
         <div class="form-error" id="login-error" hidden></div>
         <button type="submit" class="btn primary btn-block" id="btn-login-submit">Войти</button>
+      </form>
+
+      <!-- Password Reset Form -->
+      <form class="auth-form" id="auth-reset-form" data-form="reset" hidden>
+        <p style="font-size: 0.88rem; color: var(--muted); margin: 0 0 0.5rem;">Введите ваш email, указанный при регистрации, и задайте новый пароль:</p>
+        <div class="form-group">
+          <label class="form-label" for="reset-email">Email</label>
+          <input type="email" id="reset-email" class="form-input" placeholder="student@itmo.ru" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="reset-password">Новый пароль (не менее 4 символов)</label>
+          <input type="password" id="reset-password" class="form-input" placeholder="••••••••" required minlength="4" autocomplete="new-password">
+        </div>
+        <div class="form-error" id="reset-error" hidden></div>
+        <div class="form-success" id="reset-success" style="color: var(--ok); font-size: 0.88rem; margin: 0.35rem 0;" hidden></div>
+        <button type="submit" class="btn primary btn-block" id="btn-reset-submit">Обновить пароль и войти</button>
       </form>
 
       <!-- Teacher Login Form -->
@@ -628,7 +649,7 @@ ${navbarHtml("", "home", site)}
 <main class="platform-container">
   <!-- Clean Portal Hero -->
   <section class="portal-hero">
-    <div class="hero-badge">🎓 Университетский курс · Факультет ИТ</div>
+    <div class="hero-badge">🎓 Университетский курс · Дискретная математика · ИТМО</div>
     <h1 class="hero-title">${esc(site.title || "Дискретная математика")}</h1>
     <p class="hero-desc">
       Интерактивная образовательная платформа: онлайн-тренажёры для самопроверки, синхронные летучки на занятиях, конспекты лекций с формулами KaTeX и подготовка к коллоквиумам.

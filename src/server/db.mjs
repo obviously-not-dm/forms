@@ -1183,6 +1183,27 @@ export function verifyUserCredentials(email, password) {
   return safeUser;
 }
 
+export function updateUserPassword(email, newPassword) {
+  const db = getDb();
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  const user = getUserByEmail(cleanEmail);
+  if (!user) {
+    throw new Error("Пользователь с таким email не найден");
+  }
+  if (!newPassword || newPassword.length < 4) {
+    throw new Error("Новый пароль должен содержать не менее 4 символов");
+  }
+
+  const passwordHash = hashPassword(newPassword);
+  const now = new Date().toISOString();
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(
+    passwordHash,
+    now,
+    user.id
+  );
+  return getUserById(user.id);
+}
+
 export function updateUserRating(userId) {
   const db = getDb();
   const user = getUserById(userId);

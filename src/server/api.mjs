@@ -24,6 +24,7 @@ import {
   getUserById,
   getUserByEmail,
   verifyUserCredentials,
+  updateUserPassword,
   updateUserRating,
   getLeaderboard,
   getStudentProfile,
@@ -359,6 +360,32 @@ export async function handleApi(req, res, pathname) {
           "Access-Control-Allow-Origin": "*",
         });
         return res.end(JSON.stringify({ ok: true, token: sess.token, user: newUser }));
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (normPath === "/api/auth/reset-password" && method === "POST") {
+      const body = await readBody(req);
+      const email = String(body.email || "").trim().toLowerCase();
+      const newPassword = String(body.new_password || body.password || "");
+
+      if (!email || !email.includes("@")) {
+        return sendJson(res, 400, { error: "Введите корректный email адрес" });
+      }
+      if (!newPassword || newPassword.length < 4) {
+        return sendJson(res, 400, { error: "Новый пароль должен содержать не менее 4 символов" });
+      }
+
+      try {
+        const updatedUser = updateUserPassword(email, newPassword);
+        const sess = createSession(updatedUser.id, "student");
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Set-Cookie": `dm_session=${sess.token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`,
+          "Access-Control-Allow-Origin": "*",
+        });
+        return res.end(JSON.stringify({ ok: true, message: "Пароль успешно изменён", token: sess.token, user: updatedUser }));
       } catch (err) {
         return sendJson(res, 400, { error: err.message });
       }

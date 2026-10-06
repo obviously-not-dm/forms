@@ -921,6 +921,33 @@ test("Platform: student auth, profile, rating, leaderboard, and contest flow", a
   await handleApi(rStop, sStop, `/api/admin/contests/${contestId}/stop`);
   assert.strictEqual(sStop.statusCode, 200);
   assert.strictEqual(sStop.json.contest.status, "finished");
+
+  // 11. Password reset flow
+  const newPassword = "newsecretpass123";
+  const { req: rReset, res: sReset } = mockReqRes("POST", "http://localhost/api/auth/reset-password", {
+    email: studentEmail,
+    new_password: newPassword,
+  });
+  await handleApi(rReset, sReset, "/api/auth/reset-password");
+  assert.strictEqual(sReset.statusCode, 200);
+  assert.strictEqual(sReset.json.ok, true);
+
+  // 12. Login with old password must fail
+  const { req: rFailLogin, res: sFailLogin } = mockReqRes("POST", "http://localhost/api/auth/login", {
+    login: studentEmail,
+    password: studentPassword,
+  });
+  await handleApi(rFailLogin, sFailLogin, "/api/auth/login");
+  assert.strictEqual(sFailLogin.statusCode, 401);
+
+  // 13. Login with new password must succeed
+  const { req: rSuccLogin, res: sSuccLogin } = mockReqRes("POST", "http://localhost/api/auth/login", {
+    login: studentEmail,
+    password: newPassword,
+  });
+  await handleApi(rSuccLogin, sSuccLogin, "/api/auth/login");
+  assert.strictEqual(sSuccLogin.statusCode, 200);
+  assert.strictEqual(sSuccLogin.json.ok, true);
 });
 
 test("tests catalog, custom test runner, and question pool are correctly generated", async () => {
