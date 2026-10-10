@@ -1212,6 +1212,185 @@ test("practices and homeworks: build outputs, REST API, PDF submission, and teac
   assert.strictEqual(sHwDel.statusCode, 200);
 });
 
+test("Group visibility restrictions, contest multi-groups, and quiz feedback endpoint", async () => {
+  const { handleApi } = await import("../src/server/api.mjs");
+  const { EventEmitter } = await import("node:events");
+
+  function mockReqRes(method, urlStr, body = null, headers = {}) {
+    const u = new URL(urlStr);
+    const req = new EventEmitter();
+    req.method = method;
+    req.url = u.pathname + u.search;
+    req.headers = { host: "localhost", ...headers };
+    const res = {
+      statusCode: 200,
+      headers: {},
+      writeHead(code, h) {
+        this.statusCode = code;
+        Object.assign(this.headers, h);
+      },
+      setHeader(k, v) {
+        this.headers[k] = v;
+      },
+      end(data) {
+        this.data = data;
+        try {
+          this.json = data ? JSON.parse(data) : null;
+        } catch {
+          this.json = null;
+        }
+      },
+    };
+    Promise.resolve().then(() => {
+      if (body) req.emit("data", JSON.stringify(body));
+      req.emit("end");
+    });
+    return { req, res };
+  }
+
+  // 1. Admin logs in
+  const { req: rAdmin, res: sAdmin } = mockReqRes("POST", "http://localhost/api/auth/login", {
+    login: "admin@itmo.ru",
+    password: "admin",
+  });
+  await handleApi(rAdmin, sAdmin, "/api/auth/login");
+  const adminToken = sAdmin.json.token;
+
+  // 2. Admin creates practice and homework for group "M3199" only
+  const privPracticeId = `prac_priv_${Date.now()}`;
+  const { req: rP1, res: sP1 } = mockReqRes("POST", "http://localhost/api/admin/practices", {
+    id: privPracticeId,
+    title: "Секретная практика M3199",
+    topic: "Графы",
+    group_name: "M3199",
+    groups: ["M3199"],
+    content: "Только для группы M3199",
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rP1, sP1, "/api/admin/practices");
+  assert.strictEqual(sP1.statusCode, 200);
+
+  const privHwId = `hw_priv_${Date.now()}`;
+  const { req: rH1, res: sH1 } = mockReqRes("POST", "http://localhost/api/admin/homeworks", {
+    id: privHwId,
+    title: "Секретное ДЗ M3199",
+    topic: "Графы",
+    group_name: "M3199",
+    groups: ["M3199"],
+    deadline: "2026-12-31 23:59",
+    max_score: 10,
+    content: "Только для группы M3199",
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rH1, sH1, "/api/admin/homeworks");
+  assert.strictEqual(sH1.statusCode, 200);
+
+  // 3. Unauthenticated guest checks practices and homeworks:
+  // Must NOT see M3199 assignments!
+  const { req: rGuestP, res: sGuestP } = mockReqRes("GET", "http://localhost/api/practices");
+  await handleApi(rGuestP, sGuestP, "/api/practices");
+  assert.strictEqual(sGuestP.statusCode, 200);
+  assert.strictEqual(sGuestP.json.is_guest, true);
+  assert.ok(!sGuestP.json.practices.some((p) => p.id === privPracticeId), "Guest must NOT see M3199 practice");
+
+  const { req: rGuestH, res: sGuestH } = mockReqRes("GET", "http://localhost/api/homeworks");
+  await handleApi(rGuestH, sGuestH, "/api/homeworks");
+  assert.strictEqual(sGuestH.statusCode, 200);
+  assert.strictEqual(sGuestH.json.is_guest, true);
+  assert.ok(!sGuestH.json.homeworks.some((h) => h.id === privHwId), "Guest must NOT see M3199 homework");
+
+  // Guest directly requesting specific assignment gets 401
+  const { req: rGuestPItem, res: sGuestPItem } = mockReqRes("GET", `http://localhost/api/practices/${privPracticeId}`);
+  await handleApi(rGuestPItem, sGuestPItem, `/api/practices/${privPracticeId}`);
+  assert.strictEqual(sGuestPItem.statusCode, 401);
+
+  // 4. Student of group M3115 logs in:
+  const studentEmail = `student_vis_${Date.now()}@itmo.ru`;
+  const { req: rReg, res: sReg } = mockReqRes("POST", "http://localhost/api/auth/register", {
+    email: studentEmail,
+    password: "password123",
+    name: "Петр Петров",
+    group: "M3115",
+  });
+  await handleApi(rReg, sReg, "/api/auth/register");
+  const studentToken = sReg.json.token;
+
+  // Student M3115 checks practices & homeworks: must NOT see M3199 assignments!
+  const { req: rStudP, res: sStudP } = mockReqRes("GET", "http://localhost/api/practices", null, {
+    authorization: `Bearer ${studentToken}`,
+  });
+  await handleApi(rStudP, sStudP, "/api/practices");
+  assert.strictEqual(sStudP.statusCode, 200);
+  assert.strictEqual(sStudP.json.is_guest, false);
+  assert.ok(!sStudP.json.practices.some((p) => p.id === privPracticeId), "Student M3115 must NOT see M3199 practice");
+
+  // Student M3115 directly requesting M3199 assignment gets 403
+  const { req: rStudPItem, res: sStudPItem } = mockReqRes("GET", `http://localhost/api/practices/${privPracticeId}`, null, {
+    authorization: `Bearer ${studentToken}`,
+  });
+  await handleApi(rStudPItem, sStudPItem, `/api/practices/${privPracticeId}`);
+  assert.strictEqual(sStudPItem.statusCode, 403);
+
+  // 5. Contest with multiple groups
+  const { req: rCnt, res: sCnt } = mockReqRes("POST", "http://localhost/api/admin/contests", {
+    title: "Мультигрупповой контест",
+    test_id: "01-graphs",
+    groups: ["M3111", "M3112", "M3115"],
+    duration_minutes: 20,
+  }, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rCnt, sCnt, "/api/admin/contests");
+  assert.strictEqual(sCnt.statusCode, 200);
+  assert.ok(sCnt.json.contest);
+  assert.ok(Array.isArray(sCnt.json.contest.groups) || typeof sCnt.json.contest.group_name === "string");
+
+  // 6. Quiz feedback endpoint
+  const { req: rFeed, res: sFeed } = mockReqRes("POST", "http://localhost/api/attempts/feedback", {
+    quiz_id: "01-graphs",
+    feedback: "Вопрос 3 содержит интересную формулировку!",
+  }, {
+    authorization: `Bearer ${studentToken}`,
+  });
+  await handleApi(rFeed, sFeed, "/api/attempts/feedback");
+  assert.strictEqual(sFeed.statusCode, 200);
+  assert.strictEqual(sFeed.json.ok, true);
+  assert.ok(sFeed.json.feedback);
+
+  // Cleanup
+  const { req: rDelP, res: sDelP } = mockReqRes("DELETE", `http://localhost/api/admin/practices/${privPracticeId}`, null, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rDelP, sDelP, `/api/admin/practices/${privPracticeId}`);
+
+  const { req: rDelH, res: sDelH } = mockReqRes("DELETE", `http://localhost/api/admin/homeworks/${privHwId}`, null, {
+    authorization: `Bearer ${adminToken}`,
+  });
+  await handleApi(rDelH, sDelH, `/api/admin/homeworks/${privHwId}`);
+});
+
+test("contests page includes group filter pills, search input, and mobile responsive layout", () => {
+  const contestsHtmlPath = path.join(ROOT, "dist", "contests", "index.html");
+  assert.ok(fs.existsSync(contestsHtmlPath), "dist/contests/index.html must exist");
+  const contestsHtml = fs.readFileSync(contestsHtmlPath, "utf8");
+
+  // Check toolbar elements
+  assert.ok(contestsHtml.includes("contests-toolbar"), "Contests page must include contests-toolbar");
+  assert.ok(contestsHtml.includes("contests-group-filters"), "Contests page must have group filters container");
+  assert.ok(contestsHtml.includes('data-group="all"'), "Group filters must include 'all' option");
+  assert.ok(contestsHtml.includes('data-group="M3115"'), "Group filters must include individual groups such as M3115");
+  assert.ok(contestsHtml.includes("contests-search-input"), "Contests page must have a search input");
+
+  // Check responsive styles in style.css
+  const styleCss = fs.readFileSync(path.join(ROOT, "dist", "assets", "style.css"), "utf8");
+  assert.ok(styleCss.includes(".table-responsive"), "CSS must define table-responsive for mobile devices");
+  assert.ok(styleCss.includes(".contests-toolbar"), "CSS must style contests-toolbar");
+  assert.ok(styleCss.includes("@media (max-width: 768px)"), "CSS must include 768px media queries");
+  assert.ok(styleCss.includes("@media (max-width: 480px)"), "CSS must include 480px media queries");
+});
+
 
 
 

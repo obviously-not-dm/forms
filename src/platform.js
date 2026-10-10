@@ -75,7 +75,7 @@ class DMPlatform {
     if (!this.user) {
       slot.innerHTML = `
         <button type="button" class="btn quiet btn-sm btn-auth-open" id="btn-auth-open">
-          👤 Вход / Регистрация
+          Вход / Регистрация
         </button>
       `;
       const btn = slot.querySelector("#btn-auth-open");
@@ -87,7 +87,7 @@ class DMPlatform {
       slot.innerHTML = `
         <div class="user-capsule admin-capsule">
           <a href="/admin.html" class="user-capsule-link" title="Перейти в панель управления">
-            🎓 Панель преподавателя
+            Панель преподавателя
           </a>
           <button type="button" class="btn quiet btn-xs btn-logout" id="btn-logout" title="Выйти">✕</button>
         </div>
@@ -127,9 +127,20 @@ class DMPlatform {
     const burger = document.getElementById("platform-burger");
     const nav = document.getElementById("platform-nav");
     if (burger && nav) {
-      burger.onclick = () => {
+      burger.onclick = (e) => {
+        e.stopPropagation();
         nav.classList.toggle("open");
       };
+      document.addEventListener("click", (e) => {
+        if (!nav.contains(e.target) && e.target !== burger) {
+          nav.classList.remove("open");
+        }
+      });
+      nav.querySelectorAll(".nav-item").forEach((link) => {
+        link.addEventListener("click", () => {
+          nav.classList.remove("open");
+        });
+      });
     }
   }
 
@@ -164,10 +175,27 @@ class DMPlatform {
     if (loginForm) {
       loginForm.onsubmit = async (e) => {
         e.preventDefault();
-        const email = document.getElementById("login-email")?.value.trim();
-        const password = document.getElementById("login-password")?.value;
+        const emailInput = document.getElementById("login-email");
+        const passInput = document.getElementById("login-password");
+        const email = emailInput?.value.trim();
+        const password = passInput?.value;
         const errEl = document.getElementById("login-error");
         if (errEl) errEl.hidden = true;
+        emailInput?.classList.remove("is-invalid");
+        passInput?.classList.remove("is-invalid");
+
+        if (!email) {
+          if (errEl) { errEl.textContent = "Введите email или логин"; errEl.hidden = false; }
+          emailInput?.classList.add("is-invalid");
+          emailInput?.focus();
+          return;
+        }
+        if (!password || password.length < 4) {
+          if (errEl) { errEl.textContent = "Пароль должен содержать не менее 4 символов"; errEl.hidden = false; }
+          passInput?.classList.add("is-invalid");
+          passInput?.focus();
+          return;
+        }
 
         try {
           const res = await fetch("/api/auth/login", {
@@ -182,6 +210,7 @@ class DMPlatform {
               errEl.textContent = data.error || "Неверный логин или пароль";
               errEl.hidden = false;
             }
+            passInput?.classList.add("is-invalid");
             return;
           }
           if (data.token) {
@@ -207,10 +236,27 @@ class DMPlatform {
     if (teacherForm) {
       teacherForm.onsubmit = async (e) => {
         e.preventDefault();
-        const email = document.getElementById("teacher-login-email")?.value.trim();
-        const password = document.getElementById("teacher-login-password")?.value;
+        const emailInput = document.getElementById("teacher-login-email");
+        const passInput = document.getElementById("teacher-login-password");
+        const email = emailInput?.value.trim();
+        const password = passInput?.value;
         const errEl = document.getElementById("teacher-login-error");
         if (errEl) errEl.hidden = true;
+        emailInput?.classList.remove("is-invalid");
+        passInput?.classList.remove("is-invalid");
+
+        if (!email) {
+          if (errEl) { errEl.textContent = "Укажите логин преподавателя"; errEl.hidden = false; }
+          emailInput?.classList.add("is-invalid");
+          emailInput?.focus();
+          return;
+        }
+        if (!password) {
+          if (errEl) { errEl.textContent = "Введите пароль преподавателя"; errEl.hidden = false; }
+          passInput?.classList.add("is-invalid");
+          passInput?.focus();
+          return;
+        }
 
         try {
           const res = await fetch("/api/auth/login", {
@@ -225,6 +271,7 @@ class DMPlatform {
               errEl.textContent = data.error || "Неверный логин или пароль преподавателя";
               errEl.hidden = false;
             }
+            passInput?.classList.add("is-invalid");
             return;
           }
           if (data.token) {
@@ -246,12 +293,48 @@ class DMPlatform {
     if (regForm) {
       regForm.onsubmit = async (e) => {
         e.preventDefault();
-        const name = document.getElementById("reg-name")?.value.trim();
-        const group = document.getElementById("reg-group")?.value.trim().toUpperCase();
-        const email = document.getElementById("reg-email")?.value.trim();
-        const password = document.getElementById("reg-password")?.value;
+        const nameInput = document.getElementById("reg-name");
+        const groupInput = document.getElementById("reg-group");
+        const emailInput = document.getElementById("reg-email");
+        const passInput = document.getElementById("reg-password");
+
+        const name = nameInput?.value.trim();
+        const group = groupInput?.value.trim().toUpperCase();
+        const email = emailInput?.value.trim();
+        const password = passInput?.value;
         const errEl = document.getElementById("reg-error");
         if (errEl) errEl.hidden = true;
+
+        nameInput?.classList.remove("is-invalid");
+        groupInput?.classList.remove("is-invalid");
+        emailInput?.classList.remove("is-invalid");
+        passInput?.classList.remove("is-invalid");
+
+        if (!name || name.length < 2) {
+          if (errEl) { errEl.textContent = "Введите фамилию и имя (не менее 2 символов)"; errEl.hidden = false; }
+          nameInput?.classList.add("is-invalid");
+          nameInput?.focus();
+          return;
+        }
+        if (!group) {
+          if (errEl) { errEl.textContent = "Укажите номер вашей учебной группы"; errEl.hidden = false; }
+          groupInput?.classList.add("is-invalid");
+          groupInput?.focus();
+          return;
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email || !emailRegex.test(email)) {
+          if (errEl) { errEl.textContent = "Введите корректный email (например, student@itmo.ru)"; errEl.hidden = false; }
+          emailInput?.classList.add("is-invalid");
+          emailInput?.focus();
+          return;
+        }
+        if (!password || password.length < 6) {
+          if (errEl) { errEl.textContent = "Пароль должен содержать минимум 6 символов"; errEl.hidden = false; }
+          passInput?.classList.add("is-invalid");
+          passInput?.focus();
+          return;
+        }
 
         try {
           const res = await fetch("/api/auth/register", {
@@ -349,6 +432,13 @@ class DMPlatform {
     modal.querySelectorAll(".auth-tab-btn").forEach((b) => {
       b.classList.toggle("active", b.dataset.tab === tab);
     });
+    const titleEl = document.getElementById("auth-modal-title");
+    if (titleEl) {
+      if (tab === "login") titleEl.textContent = "Вход на платформу";
+      else if (tab === "register") titleEl.textContent = "Регистрация студента";
+      else if (tab === "teacher") titleEl.textContent = "Вход для преподавателя";
+      else if (tab === "reset") titleEl.textContent = "Восстановление пароля";
+    }
     const loginForm = document.getElementById("auth-login-form");
     const regForm = document.getElementById("auth-register-form");
     const resetForm = document.getElementById("auth-reset-form");
@@ -422,7 +512,7 @@ class DMPlatform {
       card.innerHTML = `
         <div class="student-snapshot-card">
           <div class="snapshot-greeting">
-            <div class="snapshot-avatar">👤</div>
+            <div class="snapshot-avatar" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent); background: var(--surface); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-sm);">ID</div>
             <div>
               <h3 class="snapshot-name">${this.escape(this.user.name)}</h3>
               <p class="snapshot-group">Группа ${this.escape(this.user.group_name || "—")} · Место в рейтинге: <strong>#${profile.rank}</strong></p>
@@ -548,6 +638,15 @@ class DMPlatform {
         const rank = idx + 1;
         const badge = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `${rank}`;
         const isMe = currentUserId && u.id === currentUserId;
+        let displayName = u.name;
+        if (!currentUserId) {
+          const parts = (u.name || "").trim().split(/\s+/);
+          if (parts.length >= 2) {
+            displayName = `${parts[0]} ${parts[1][0]}.`;
+          } else if (parts[0]) {
+            displayName = parts[0];
+          }
+        }
 
         return `
           <tr class="${isMe ? 'is-me-row' : ''} ${rank <= 3 ? `top-rank-${rank}` : ''}">
@@ -555,7 +654,7 @@ class DMPlatform {
               <span class="rank-badge">${badge}</span>
             </td>
             <td class="col-student">
-              <strong>${this.escape(u.name)}</strong>
+              <strong>${this.escape(displayName)}</strong>
               ${isMe ? '<span class="me-pill">Вы</span>' : ''}
             </td>
             <td class="col-group">
@@ -871,7 +970,7 @@ class DMPlatform {
                     <td><code>${this.escape(a.quiz_id)}</code></td>
                     <td><span class="mode-pill ${a.mode}">${a.mode === 'exam' ? 'Экзамен' : 'Тренировка'}</span></td>
                     <td><strong>${a.score} / ${a.max_score}</strong> (${a.percentage}%)</td>
-                    <td>${a.duration_sec ? `${Math.round(a.duration_sec / 60)} мин` : '—'}</td>
+                    <td>${a.duration_sec ? `${Math.floor(a.duration_sec / 60)} мин ${a.duration_sec % 60} с` : '—'}</td>
                     <td>${new Date(a.created_at).toLocaleString("ru-RU")}</td>
                   </tr>
                 `).join("")}
@@ -941,21 +1040,38 @@ class DMPlatform {
     const finishedList = document.getElementById("finished-contests-list");
     if (!activeList || !finishedList) return;
 
-    let contests = [];
+    const groupFilters = document.getElementById("contests-group-filters");
+    const searchInput = document.getElementById("contests-search-input");
+
+    let allContests = [];
+    let currentGroup = "all";
+
+    // Auto-select user's group if logged in
+    const userGroup = this.user?.group_name || localStorage.getItem("dm_user_group");
+    if (userGroup && groupFilters) {
+      const matchPill = groupFilters.querySelector(`.group-filter-pill[data-group="${userGroup}"]`);
+      if (matchPill) {
+        groupFilters.querySelectorAll(".group-filter-pill").forEach((b) => b.classList.remove("active"));
+        matchPill.classList.add("active");
+        currentGroup = userGroup;
+      }
+    }
+
     try {
       const res = await fetch("/api/contests");
       if (res.ok) {
-        contests = await res.json();
+        allContests = await res.json();
       }
     } catch (e) {
       console.warn("Failed to fetch contests from API, falling back:", e);
     }
 
-    if (!Array.isArray(contests) || !contests.length) {
-      contests = [
+    if (!Array.isArray(allContests) || !allContests.length) {
+      allContests = [
         {
           id: "cnt_active_1",
           title: "Летучка #1: Основы теории графов",
+          groups: ["all"],
           group_name: "all",
           duration_minutes: 20,
           status: "active",
@@ -965,6 +1081,7 @@ class DMPlatform {
         {
           id: "cnt_past_1",
           title: "Мини-контест: Деревья и остовы",
+          groups: ["all"],
           group_name: "all",
           duration_minutes: 25,
           status: "finished",
@@ -974,56 +1091,103 @@ class DMPlatform {
       ];
     }
 
-    const active = contests.filter((c) => c.status === "active");
-    const finished = contests.filter((c) => c.status === "finished");
+    const formatGroups = (c) => {
+      const grps = Array.isArray(c.groups) && c.groups.length
+        ? c.groups
+        : (c.group_name ? c.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+      if (grps.includes("all") || c.group_name === "all") return "Все группы";
+      return grps.join(", ");
+    };
 
-    if (!active.length) {
-      activeList.innerHTML = '<p class="muted">Прямо сейчас активных контестов нет. Преподаватель запустит работу во время пары.</p>';
-    } else {
-      activeList.innerHTML = active.map((c) => `
-        <div class="contest-card live">
-          <div class="contest-card-status">
-            <span class="live-dot pulse"></span> Идёт прямо сейчас
+    const renderContests = () => {
+      const term = searchInput?.value.trim().toLowerCase() || "";
+
+      const filtered = allContests.filter((c) => {
+        if (currentGroup !== "all") {
+          const cGroups = Array.isArray(c.groups) && c.groups.length
+            ? c.groups
+            : (c.group_name ? c.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+          const matchGroup = cGroups.includes("all") || cGroups.includes(currentGroup);
+          if (!matchGroup) return false;
+        }
+
+        if (term) {
+          const title = (c.title || "").toLowerCase();
+          const grp = (c.group_name || "").toLowerCase();
+          if (!title.includes(term) && !grp.includes(term)) return false;
+        }
+
+        return true;
+      });
+
+      const active = filtered.filter((c) => c.status === "active");
+      const finished = filtered.filter((c) => c.status === "finished");
+
+      if (!active.length) {
+        activeList.innerHTML = `<p class="muted">${currentGroup === "all" ? "Прямо сейчас активных контестов нет. Преподаватель запустит работу во время пары." : `Активных контестов для группы ${this.escape(currentGroup)} сейчас нет.`}</p>`;
+      } else {
+        activeList.innerHTML = active.map((c) => `
+          <div class="contest-card live">
+            <div class="contest-card-status">
+              <span class="live-dot pulse"></span> Идёт прямо сейчас
+            </div>
+            <h3 class="contest-card-title">${this.escape(c.title)}</h3>
+            <div class="contest-card-meta">
+              <span>Группы: <strong>${this.escape(formatGroups(c))}</strong></span>
+              <span>Время: <strong>${c.duration_minutes} мин</strong></span>
+              <span>Сдали: <strong>${c.submissions_count || 0} студентов</strong></span>
+            </div>
+            <div class="contest-card-actions">
+              <a href="/contests/room.html?id=${encodeURIComponent(c.id)}" class="btn primary btn-sm">
+                Войти в контест →
+              </a>
+              <button type="button" class="btn quiet btn-sm" onclick="window.dmPlatform.showStandingsModal('${c.id}')">
+                📊 Результаты и статистика
+              </button>
+            </div>
           </div>
-          <h3 class="contest-card-title">${this.escape(c.title)}</h3>
-          <div class="contest-card-meta">
-            <span>Группа: <strong>${this.escape(c.group_name === "all" ? "Все группы" : c.group_name)}</strong></span>
-            <span>Время: <strong>${c.duration_minutes} мин</strong></span>
-            <span>Сдали: <strong>${c.submissions_count || 0} студентов</strong></span>
+        `).join("");
+      }
+
+      if (!finished.length) {
+        finishedList.innerHTML = `<p class="muted">${currentGroup === "all" ? "Завершённых контестов пока нет." : `Завершённых контестов для группы ${this.escape(currentGroup)} пока нет.`}</p>`;
+      } else {
+        finishedList.innerHTML = finished.map((c) => `
+          <div class="contest-card finished">
+            <div class="contest-card-status finished">Завершён</div>
+            <h3 class="contest-card-title">${this.escape(c.title)}</h3>
+            <div class="contest-card-meta">
+              <span>Группы: <strong>${this.escape(formatGroups(c))}</strong></span>
+              <span>Длительность: ${c.duration_minutes} мин</span>
+              <span>Всего участников: <strong>${c.submissions_count || 0}</strong></span>
+              <span>Завершён: ${c.ends_at ? new Date(c.ends_at).toLocaleDateString("ru-RU") : "—"}</span>
+            </div>
+            <div class="contest-card-actions">
+              <button type="button" class="btn quiet btn-sm" onclick="window.dmPlatform.showStandingsModal('${c.id}')">
+                📊 Итоги и статистика (${c.submissions_count || 0})
+              </button>
+            </div>
           </div>
-          <div class="contest-card-actions">
-            <a href="/contests/room.html?id=${encodeURIComponent(c.id)}" class="btn primary btn-sm">
-              Войти в контест →
-            </a>
-            <button type="button" class="btn quiet btn-sm" onclick="window.dmPlatform.showStandingsModal('${c.id}')">
-              📊 Результаты и статистика
-            </button>
-          </div>
-        </div>
-      `).join("");
+        `).join("");
+      }
+    };
+
+    if (groupFilters) {
+      groupFilters.querySelectorAll(".group-filter-pill").forEach((btn) => {
+        btn.onclick = () => {
+          groupFilters.querySelectorAll(".group-filter-pill").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          currentGroup = btn.dataset.group || "all";
+          renderContests();
+        };
+      });
     }
 
-    if (!finished.length) {
-      finishedList.innerHTML = '<p class="muted">Завершённых контестов пока нет.</p>';
-    } else {
-      finishedList.innerHTML = finished.map((c) => `
-        <div class="contest-card finished">
-          <div class="contest-card-status finished">Завершён</div>
-          <h3 class="contest-card-title">${this.escape(c.title)}</h3>
-          <div class="contest-card-meta">
-            <span>Группа: <strong>${this.escape(c.group_name === "all" ? "Все группы" : c.group_name)}</strong></span>
-            <span>Длительность: ${c.duration_minutes} мин</span>
-            <span>Всего участников: <strong>${c.submissions_count || 0}</strong></span>
-            <span>Завершён: ${new Date(c.ends_at).toLocaleDateString("ru-RU")}</span>
-          </div>
-          <div class="contest-card-actions">
-            <button type="button" class="btn quiet btn-sm" onclick="window.dmPlatform.showStandingsModal('${c.id}')">
-              📊 Итоги и статистика (${c.submissions_count || 0})
-            </button>
-          </div>
-        </div>
-      `).join("");
+    if (searchInput) {
+      searchInput.oninput = () => renderContests();
     }
+
+    renderContests();
   }
 
   async showStandingsModal(contestId) {
@@ -1178,7 +1342,11 @@ class DMPlatform {
       const contest = await res.json();
 
       document.getElementById("room-contest-title").textContent = contest.title;
-      document.getElementById("room-contest-group").textContent = contest.group_name === "all" ? "Все группы" : `Группа ${contest.group_name}`;
+      const grps = Array.isArray(contest.groups) && contest.groups.length
+        ? contest.groups
+        : (contest.group_name ? contest.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+      const groupText = grps.includes("all") || contest.group_name === "all" ? "Все группы" : (grps.length > 1 ? `Группы: ${grps.join(", ")}` : `Группа ${grps[0]}`);
+      document.getElementById("room-contest-group").textContent = groupText;
       document.getElementById("room-user-name").textContent = `${this.user.name} (${this.user.group_name || ''})`;
 
       // Timer countdown

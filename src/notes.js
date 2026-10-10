@@ -20,6 +20,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
+  // Вспомогательная функция очистки HTML для полнотекстового поиска
+  function stripHtml(html) {
+    if (!html) return "";
+    return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").toLowerCase();
+  }
+
+  // Предварительно готовим поисковый индекс для каждого конспекта
+  for (const n of notesData) {
+    n._searchText = `${n.meta.title || ""} ${n.meta.description || ""} ${n.meta.topic || ""} ${stripHtml(n.html)}`.toLowerCase();
+  }
+
   // Определение активного конспекта по URL параметру
   const urlParams = new URLSearchParams(window.location.search);
   let activeId = urlParams.get("id") || notesData[0].id;
@@ -38,7 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
     for (const n of displayList) {
       const topic = n.meta.topic || "Общее";
       if (!grouped.has(topic)) grouped.set(topic, []);
-      if (!lower || n.meta.title.toLowerCase().includes(lower) || (n.meta.description || "").toLowerCase().includes(lower) || topic.toLowerCase().includes(lower)) {
+      if (!lower || n._searchText.includes(lower)) {
         grouped.get(topic).push(n);
       }
     }

@@ -4,10 +4,14 @@ import crypto from "node:crypto";
 
 const ROOT = path.resolve(".");
 const UPLOADS_DIR = path.join(ROOT, "data", "uploads", "homeworks");
+const IMAGES_DIR = path.join(ROOT, "data", "uploads", "images");
 
 export function initStorage() {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(IMAGES_DIR)) {
+    fs.mkdirSync(IMAGES_DIR, { recursive: true });
   }
 }
 
@@ -57,6 +61,37 @@ export function getPdfFilePath(filename) {
   if (!filename) return null;
   const safeName = path.basename(filename);
   const fullPath = path.join(UPLOADS_DIR, safeName);
+  if (fs.existsSync(fullPath)) {
+    return fullPath;
+  }
+  return null;
+}
+
+export function saveUploadedImage(originalName, buffer) {
+  initStorage();
+  const ext = path.extname(originalName || "").toLowerCase() || ".png";
+  const safeBase = String(originalName || "image")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^a-zA-Z0-9_\-\u0400-\u04FF]/g, "_")
+    .slice(0, 50);
+  const rand = crypto.randomBytes(6).toString("hex");
+  const uniqueName = `img_${Date.now()}_${rand}_${safeBase}${ext}`;
+  const targetPath = path.join(IMAGES_DIR, uniqueName);
+  fs.writeFileSync(targetPath, buffer);
+
+  return {
+    filename: uniqueName,
+    originalName: String(originalName || uniqueName),
+    size: buffer.length,
+    path: targetPath,
+    url: `/api/uploads/images/${uniqueName}`,
+  };
+}
+
+export function getImageFilePath(filename) {
+  if (!filename) return null;
+  const safeName = path.basename(filename);
+  const fullPath = path.join(IMAGES_DIR, safeName);
   if (fs.existsSync(fullPath)) {
     return fullPath;
   }

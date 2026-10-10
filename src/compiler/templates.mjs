@@ -31,7 +31,12 @@ export function navbarHtml(rel = "", activeTab = "", site = {}) {
   <div class="topbar-inner">
     <div class="topbar-brand-wrap">
       <a class="platform-logo" href="${rel}">
-        <span class="logo-icon">📐</span>
+        <span class="logo-icon-svg" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="19" r="2.5"/>
+            <line x1="7.2" y1="7.2" x2="10.8" y2="17.2"/><line x1="16.8" y1="7.2" x2="13.2" y2="17.2"/><line x1="7.5" y1="6" x2="16.5" y2="6"/>
+          </svg>
+        </span>
         <div class="logo-titles">
           <span class="logo-main">ДМ Платформа</span>
           <span class="logo-sub">Дискретная математика</span>
@@ -40,18 +45,18 @@ export function navbarHtml(rel = "", activeTab = "", site = {}) {
     </div>
 
     <nav class="topbar-nav" id="platform-nav">
-      <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">🏠 Главная</a>
-      <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">⏱️ Контесты</a>
-      <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}tests/">📋 Тренажёры</a>
-      <a class="nav-item ${activeTab === 'practices' ? 'active' : ''}" href="${rel}practices/">📝 Практики</a>
-      <a class="nav-item ${activeTab === 'homeworks' ? 'active' : ''}" href="${rel}homeworks/">📤 ДЗ</a>
-      <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">📚 Конспекты</a>
-      <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">🎓 Коллоквиумы</a>
-      <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">🏆 Рейтинг</a>
+      <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">Главная</a>
+      <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">Контесты</a>
+      <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}tests/">Тренажёры</a>
+      <a class="nav-item ${activeTab === 'practices' ? 'active' : ''}" href="${rel}practices/">Практики</a>
+      <a class="nav-item ${activeTab === 'homeworks' ? 'active' : ''}" href="${rel}homeworks/">ДЗ</a>
+      <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">Конспекты</a>
+      <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">Коллоквиумы</a>
+      <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">Рейтинг</a>
     </nav>
 
     <div class="topbar-auth" id="topbar-auth-slot">
-      <button type="button" class="btn quiet btn-sm btn-auth-open" id="btn-auth-open">👤 Вход</button>
+      <button type="button" class="btn quiet btn-sm btn-auth-open" id="btn-auth-open">Вход</button>
     </div>
 
     <button type="button" class="btn quiet btn-sm platform-burger" id="platform-burger" aria-label="Меню">
@@ -66,14 +71,15 @@ export function authModalHtml(site = {}) {
   return `
 <dialog id="auth-modal" class="auth-modal-dialog">
   <div class="auth-modal-box">
+    <button type="button" class="btn quiet btn-sm auth-close-btn" data-auth-close aria-label="Закрыть">✕</button>
     <div class="auth-modal-header">
+      <h3 class="auth-modal-title" id="auth-modal-title">Вход на платформу</h3>
       <div class="auth-tabs" role="tablist">
         <button type="button" class="auth-tab-btn active" data-tab="login" role="tab">Вход</button>
         <button type="button" class="auth-tab-btn" data-tab="register" role="tab">Регистрация</button>
-        <button type="button" class="auth-tab-btn" data-tab="reset" role="tab">Сброс пароля</button>
         <button type="button" class="auth-tab-btn" data-tab="teacher" role="tab">Преподаватель</button>
+        <button type="button" class="auth-tab-btn" data-tab="reset" role="tab">Сброс пароля</button>
       </div>
-      <button type="button" class="btn quiet btn-sm auth-close-btn" data-auth-close aria-label="Закрыть">✕</button>
     </div>
 
     <div class="auth-modal-body">
@@ -102,8 +108,8 @@ export function authModalHtml(site = {}) {
           <input type="email" id="reset-email" class="form-input" placeholder="student@itmo.ru" required autocomplete="email">
         </div>
         <div class="form-group">
-          <label class="form-label" for="reset-password">Новый пароль (не менее 4 символов)</label>
-          <input type="password" id="reset-password" class="form-input" placeholder="••••••••" required minlength="4" autocomplete="new-password">
+          <label class="form-label" for="reset-password">Новый пароль (не менее 6 символов)</label>
+          <input type="password" id="reset-password" class="form-input" placeholder="••••••••" required minlength="6" autocomplete="new-password">
         </div>
         <div class="form-error" id="reset-error" hidden></div>
         <div class="form-success" id="reset-success" style="color: var(--ok); font-size: 0.88rem; margin: 0.35rem 0;" hidden></div>
@@ -142,8 +148,8 @@ export function authModalHtml(site = {}) {
           <input type="email" id="reg-email" class="form-input" placeholder="ivanov@itmo.ru" required autocomplete="email">
         </div>
         <div class="form-group">
-          <label class="form-label" for="reg-password">Пароль (не менее 4 символов)</label>
-          <input type="password" id="reg-password" class="form-input" placeholder="••••••••" required minlength="4" autocomplete="new-password">
+          <label class="form-label" for="reg-password">Пароль (не менее 6 символов)</label>
+          <input type="password" id="reg-password" class="form-input" placeholder="••••••••" required minlength="6" autocomplete="new-password">
         </div>
         <div class="form-error" id="reg-error" hidden></div>
         <button type="submit" class="btn primary btn-block" id="btn-register-submit">Зарегистрироваться</button>
@@ -187,7 +193,7 @@ export function questionHtml(q) {
     ${answer}
     ${hints}
     <div class="q-tools">
-      <button class="btn quiet favorite-btn" type="button" aria-pressed="false" title="Сохранить в избранные задания">⭐ В избранное</button>
+      <button class="btn quiet favorite-btn" type="button" aria-pressed="false" title="Сохранить в избранные задания">В избранное</button>
       ${q.hintsHtml && q.hintsHtml.length ? `<button class="btn quiet hint-btn" type="button">Подсказка</button>` : ""}
       <button class="btn quiet check-btn" type="button">Проверить</button>
       <button class="btn quiet flag-btn" type="button" aria-pressed="false">Вернуться позже</button>
@@ -268,18 +274,18 @@ ${navbarHtml("../", "tests", site)}
       <legend class="field-label">Формат проверки:</legend>
       <label class="mode">
         <input type="radio" name="mode" value="exam" checked>
-        <span class="mode-name">⏱️ Экзамен (проверка в конце)</span>
+        <span class="mode-name">Экзамен (проверка в конце)</span>
         <span class="mode-desc">Отвечаете на все задания теста, после чего завершаете работу и получаете итоговые баллы, процент и подробный разбор решений.</span>
       </label>
       <label class="mode">
         <input type="radio" name="mode" value="practice">
-        <span class="mode-name">💡 Тренировка (с подсказками)</span>
+        <span class="mode-name">Тренировка (с подсказками)</span>
         <span class="mode-desc">Можно проверять каждое задание сразу после ответа, открывать теоретические подсказки и разбирать ошибки шаг за шагом.</span>
       </label>
     </fieldset>
     <div class="pretest-action-wrap" style="margin-top: 1.5rem;">
       <button class="btn primary btn-lg" id="start-btn" type="button" style="width: 100%; padding: 0.85rem; font-size: 1.05rem; font-weight: 700;">
-        🚀 Начать тестирование (${tasksWord(count)})
+        Начать тестирование (${tasksWord(count)})
       </button>
     </div>
   </section>
@@ -351,13 +357,13 @@ ${navbarHtml("../", "tests", site)}
 
       <div class="quiz-sidebar-actions">
         <button class="btn quiet quiz-action-btn" type="button" id="side-to-top" title="Перейти к началу страницы">
-          ⬆️ В начало
+          В начало
         </button>
         <button class="btn quiet quiz-action-btn" type="button" id="side-unanswered" title="Перейти к первому неотвеченному вопросу">
-          🎯 К неотвеченному
+          К неотвеченному
         </button>
         <button class="btn quiet quiz-action-btn" type="button" id="side-to-finish" title="Перейти к завершению теста">
-          ⬇️ К завершению
+          К завершению
         </button>
       </div>
     </div>
@@ -374,9 +380,9 @@ ${navbarHtml("../", "tests", site)}
       ${map}
     </div>
     <div class="sheet-map-footer">
-      <button class="btn quiet btn-sm" type="button" id="modal-to-top">⬆️ В начало</button>
-      <button class="btn primary btn-sm" type="button" id="modal-unanswered">🎯 К неотвеченному</button>
-      <button class="btn quiet btn-sm" type="button" id="modal-to-finish">⬇️ К финишу</button>
+      <button class="btn quiet btn-sm" type="button" id="modal-to-top">В начало</button>
+      <button class="btn primary btn-sm" type="button" id="modal-unanswered">К неотвеченному</button>
+      <button class="btn quiet btn-sm" type="button" id="modal-to-finish">К финишу</button>
     </div>
   </div>
 </dialog>
@@ -411,7 +417,7 @@ export function notesPage(notes = [], site = {}) {
   ${navbarHtml("../", "notes", site)}
   <div class="notes-subbar" style="background: var(--card); border-bottom: 1px solid var(--line); padding: 0.5rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
     <div style="font-weight: 600; font-size: 0.95rem; color: var(--ink); display: flex; align-items: center; gap: 0.5rem;">
-      <span>📚 Конспекты и лекции курса</span>
+      <span>Конспекты и лекции курса</span>
     </div>
     <button type="button" class="btn quiet btn-sm notes-mobile-menu-btn" id="notes-menu-btn" aria-label="Открыть список тем конспектов">
       ☰ Темы
@@ -420,7 +426,7 @@ export function notesPage(notes = [], site = {}) {
   <div class="notes-layout">
     <aside class="notes-sidebar" aria-label="Список тем и лекций">
       <div class="notes-sidebar-header">
-        <input type="search" id="notes-search" class="notes-search-input" placeholder="🔍 Поиск по конспектам..." autocomplete="off">
+        <input type="search" id="notes-search" class="notes-search-input" placeholder="Поиск по конспектам..." autocomplete="off">
       </div>
       <nav class="notes-tree" id="notes-tree"></nav>
     </aside>
@@ -504,13 +510,13 @@ export function colloquiumsPage(colloquiums = [], site = {}) {
 <body class="colloquiums-app platform-body">
   ${navbarHtml("../", "colloquiums", site)}
   <div class="colloquiums-subtopbar" style="background: var(--card); border-bottom: 1px solid var(--line); padding: 0.6rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
-    <span class="colloquiums-brand" style="font-weight: 600; font-size: 1rem;">🎓 Коллоквиумы по курсу ДМ</span>
+    <span class="colloquiums-brand" style="font-weight: 600; font-size: 1rem;">Коллоквиумы по курсу ДМ</span>
     <div class="colloquiums-mode-tabs" role="tablist">
       <button type="button" class="colloquiums-mode-btn active" data-mode="dict" role="tab" title="Читать все определения подряд">
-        📖 Сборник определений (${visible.length})
+        Сборник определений (${visible.length})
       </button>
       <button type="button" class="colloquiums-mode-btn" data-mode="cards" role="tab" title="Интерактивные карточки с переворотом">
-        🗂️ Карточки (Quizlet)
+        Интерактивные карточки
       </button>
     </div>
   </div>
@@ -524,7 +530,7 @@ export function colloquiumsPage(colloquiums = [], site = {}) {
         <button type="button" class="col-pill-btn" data-col="2">Коллоквиум 2 (${col2Count})</button>
       </div>
       <div class="colloquiums-search-box">
-        <input type="search" id="colloquiums-search" class="colloquiums-search-input" placeholder="🔍 Поиск по терминам, формулам и номерам..." autocomplete="off">
+        <input type="search" id="colloquiums-search" class="colloquiums-search-input" placeholder="Поиск по терминам, формулам и номерам..." autocomplete="off">
         <button type="button" id="clear-search-btn" class="clear-search-btn" hidden title="Очистить поиск">✕</button>
       </div>
     </div>
@@ -649,19 +655,19 @@ ${navbarHtml("", "home", site)}
 <main class="platform-container">
   <!-- Clean Portal Hero -->
   <section class="portal-hero">
-    <div class="hero-badge">🎓 Университетский курс · Дискретная математика · ИТМО</div>
+    <div class="hero-badge">// ITMO.DM · Лаборатория дискретной математики</div>
     <h1 class="hero-title">${esc(site.title || "Дискретная математика")}</h1>
     <p class="hero-desc">
-      Интерактивная образовательная платформа: онлайн-тренажёры для самопроверки, синхронные летучки на занятиях, конспекты лекций с формулами KaTeX и подготовка к коллоквиумам.
+      Интерактивная образовательная среда: проверочные тренажёры для самоподготовки, синхронные аудиторные летучки, теоретические конспекты с KaTeX и банк определений к коллоквиумам.
     </p>
     <div class="hero-actions">
-      <a href="tests/" class="btn primary">📋 Перейти к тренажёрам</a>
-      <a href="practices/" class="btn quiet">📝 Практики</a>
-      <a href="homeworks/" class="btn quiet">📤 ДЗ</a>
-      <a href="contests/" class="btn quiet">⏱️ Летучки на парах</a>
-      <a href="notes/" class="btn quiet">📚 Конспекты</a>
-      <a href="colloquiums/" class="btn quiet">🎓 Коллоквиумы</a>
-      <a href="leaderboard/" class="btn quiet">🏆 Рейтинг</a>
+      <a href="tests/" class="btn primary">Онлайн-тренажёры</a>
+      <a href="practices/" class="btn quiet">Практики</a>
+      <a href="homeworks/" class="btn quiet">Домашние задания</a>
+      <a href="contests/" class="btn quiet">Контесты</a>
+      <a href="notes/" class="btn quiet">Конспекты лекций</a>
+      <a href="colloquiums/" class="btn quiet">Коллоквиумы</a>
+      <a href="leaderboard/" class="btn quiet">Рейтинг курса</a>
     </div>
   </section>
 
@@ -674,7 +680,7 @@ ${navbarHtml("", "home", site)}
   <!-- Key Capabilities / Возможности платформы (clean feature cards) -->
   <section class="portal-features-section" style="margin-bottom: 2rem;">
     <div class="section-title-wrap" style="margin-bottom: 1.25rem;">
-      <h2 class="section-title" style="margin: 0 0 0.35rem; font-size: 1.45rem;">✨ Ключевые возможности платформы</h2>
+      <h2 class="section-title" style="margin: 0 0 0.35rem; font-size: 1.45rem;">Учебные модули платформы</h2>
       <p class="section-subtitle" style="color: var(--muted); font-size: 0.95rem; margin: 0;">
         Все учебные инструменты распределены по отдельным вкладкам в верхнем меню. Выберите нужный раздел для подготовки:
       </p>
@@ -684,7 +690,7 @@ ${navbarHtml("", "home", site)}
       <!-- 1. Тренажёры -->
       <article class="portal-capability-card">
         <div class="portal-capability-top">
-          <span class="portal-capability-icon">📋</span>
+          <span class="portal-capability-icon">[01]</span>
           <span class="portal-capability-tag">Практика</span>
         </div>
         <h3 class="portal-capability-title">Онлайн-тренажёры и генератор тестов</h3>
@@ -700,7 +706,7 @@ ${navbarHtml("", "home", site)}
       <!-- 2. Онлайн-контесты -->
       <article class="portal-capability-card">
         <div class="portal-capability-top">
-          <span class="portal-capability-icon">⏱️</span>
+          <span class="portal-capability-icon">[02]</span>
           <span class="portal-capability-tag">На занятиях</span>
         </div>
         <h3 class="portal-capability-title">Онлайн-контесты и экспресс-летучки</h3>
@@ -716,7 +722,7 @@ ${navbarHtml("", "home", site)}
       <!-- 3. Конспекты -->
       <article class="portal-capability-card">
         <div class="portal-capability-top">
-          <span class="portal-capability-icon">📚</span>
+          <span class="portal-capability-icon">[03]</span>
           <span class="portal-capability-tag">Теория</span>
         </div>
         <h3 class="portal-capability-title">Конспекты и лекции с формулами</h3>
@@ -732,11 +738,11 @@ ${navbarHtml("", "home", site)}
       <!-- 4. Коллоквиумы -->
       <article class="portal-capability-card">
         <div class="portal-capability-top">
-          <span class="portal-capability-icon">🎓</span>
+          <span class="portal-capability-icon">[04]</span>
           <span class="portal-capability-tag">Подготовка к опросам</span>
         </div>
-        <h3 class="portal-capability-title">Коллоквиумы и термины (Quizlet)</h3>
-        <div class="portal-capability-sub">${colloquiumsCount} определений · Карточки Quizlet 3D</div>
+        <h3 class="portal-capability-title">Коллоквиумы и термины</h3>
+        <div class="portal-capability-sub">${colloquiumsCount} определений · Карточки с переворотом</div>
         <p class="portal-capability-desc">
           Единый банк всех 106 строгих математических определений из лекций Пермякова и Страдиной (Коллоквиум 1 и Коллоквиум 2). Интерактивные флип-карточки для запоминания и структурированный словарь терминов.
         </p>
@@ -748,7 +754,7 @@ ${navbarHtml("", "home", site)}
       <!-- 5. Практические занятия -->
       <article class="portal-capability-card">
         <div class="portal-capability-top">
-          <span class="portal-capability-icon">📝</span>
+          <span class="portal-capability-icon">[05]</span>
           <span class="portal-capability-tag">На семинарах</span>
         </div>
         <h3 class="portal-capability-title">Практические занятия и разборы</h3>
@@ -764,7 +770,7 @@ ${navbarHtml("", "home", site)}
       <!-- 6. Домашние задания -->
       <article class="portal-capability-card">
         <div class="portal-capability-top">
-          <span class="portal-capability-icon">📤</span>
+          <span class="portal-capability-icon">[06]</span>
           <span class="portal-capability-tag">Самостоятельно</span>
         </div>
         <h3 class="portal-capability-title">Домашние задания и сдача решений</h3>
@@ -783,7 +789,7 @@ ${navbarHtml("", "home", site)}
   <div class="portal-bottom-grid">
     <div class="portal-sidebar-box" style="margin-bottom: 0;">
       <div class="sidebar-box-header">
-        <h3>🏆 Лидеры курса (Топ-5)</h3>
+        <h3>Таблица лидеров (Топ-5)</h3>
         <a href="leaderboard/" class="sidebar-more-link">Весь рейтинг →</a>
       </div>
       <div id="home-top5-leaderboard">
@@ -792,7 +798,7 @@ ${navbarHtml("", "home", site)}
     </div>
 
     <div class="portal-sidebar-box feature-box" style="margin-bottom: 0;">
-      <h3>🧭 Советы по подготовке к сдаче</h3>
+      <h3>Рекомендации по подготовке</h3>
       <p style="margin: 0 0 0.75rem; font-size: 0.88rem; color: var(--muted); line-height: 1.5;">
         Чтобы успешно закрыть дисциплину на максимальный балл:
       </p>
@@ -831,7 +837,7 @@ export function testsPage(tests = [], site = {}) {
       <h3 class="test-catalog-title"><a href="../${esc(t.id)}/">${esc(t.meta?.title || t.id)}</a></h3>
       <p class="test-catalog-desc">${esc(t.meta?.description || `Проверочная работа по теме: ${t.meta?.topic || t.id}`)}</p>
       <div class="test-catalog-footer">
-        <span class="test-tasks-count">📝 ${tasksWord(t.count)}</span>
+        <span class="test-tasks-count">${tasksWord(t.count)}</span>
         <a href="../${esc(t.id)}/" class="btn primary btn-sm">Начать тест →</a>
       </div>
     </article>
@@ -844,18 +850,18 @@ export function testsPage(tests = [], site = {}) {
   <main class="platform-container">
     <div class="page-header">
       <div class="page-title-wrap">
-        <h1 class="page-title">📋 Тренажёры и генератор тестов</h1>
-        <p class="page-subtitle">Практические задания по всем темам курса дискретной математики с мгновенной проверкой, разборами и генерацией случайных вариантов.</p>
+        <h1 class="page-title">Онлайн-тренажёры и генератор тестов</h1>
+        <p class="page-subtitle">Практические проверочные работы по всем разделам дискретной математики с автоматической оценкой и генератором случайных вариантов.</p>
       </div>
     </div>
 
     <!-- Generator Banner Card -->
     <div class="test-generator-card">
       <div class="generator-header">
-        <div class="generator-icon">🎲</div>
+        <div class="generator-icon">[GEN]</div>
         <div>
-          <h2 class="generator-title">Генератор случайного теста</h2>
-          <p class="generator-desc">Сформируйте персональный проверочный вариант из общего пула (${totalTasks} заданий курса) для комплексной самопроверки перед коллоквиумом или экзаменом.</p>
+          <h2 class="generator-title">Генератор персонального варианта</h2>
+          <p class="generator-desc">Сформируйте проверочный вариант из общего пула (${totalTasks} заданий курса) для комплексной самопроверки перед коллоквиумом или экзаменом.</p>
         </div>
       </div>
 
@@ -882,14 +888,14 @@ export function testsPage(tests = [], site = {}) {
         <div class="generator-row">
           <label class="generator-label">Режим прохождения:</label>
           <div class="generator-pills" id="gen-mode-pills">
-            <button type="button" class="gen-pill active" data-mode="exam">⏱️ Экзамен (проверка в конце)</button>
-            <button type="button" class="gen-pill" data-mode="practice">💡 Тренировка (с подсказками)</button>
+            <button type="button" class="gen-pill active" data-mode="exam">Экзамен (проверка в конце)</button>
+            <button type="button" class="gen-pill" data-mode="practice">Тренировка (с подсказками)</button>
           </div>
         </div>
 
         <div class="generator-actions">
           <button type="button" class="btn primary" id="btn-start-generator">
-            🚀 Сгенерировать и начать тест
+            Сформировать вариант и начать
           </button>
         </div>
       </div>
@@ -902,7 +908,7 @@ export function testsPage(tests = [], site = {}) {
         ${testTopics.map((tp) => `<button class="btn quiet btn-sm topic-filter-btn" data-topic="${esc(tp)}" type="button">${esc(tp)}</button>`).join("")}
       </div>
       <div class="tests-search-box">
-        <input type="search" id="tests-search" class="tests-search-input" placeholder="🔍 Поиск теста по названию...">
+        <input type="search" id="tests-search" class="tests-search-input" placeholder="Поиск теста по названию...">
       </div>
     </div>
 
@@ -914,7 +920,7 @@ export function testsPage(tests = [], site = {}) {
     <!-- Bookmarks Section -->
     <div class="favorites-section" id="favorites-section" style="margin-top: 3rem;" hidden>
       <div class="section-title-wrap">
-        <h2 class="section-title">⭐ Мои избранные задания</h2>
+        <h2 class="section-title">Сохранённые задания (Избранное)</h2>
       </div>
       <div id="favorites-list" class="favorites-grid"></div>
     </div>
@@ -935,7 +941,7 @@ export function customTestPage(site = {}) {
     <div class="quiz-subtopbar-inner">
       <div class="quiz-subtopbar-left">
         <a class="topbar-back" href="./" aria-label="К каталогу тестов">← Все тренажёры</a>
-        <span class="topbar-title" id="custom-test-title">🎲 Случайный вариант</span>
+        <span class="topbar-title" id="custom-test-title">Случайный вариант</span>
       </div>
       <div class="quiz-subtopbar-right">
         <button class="topbar-count" id="map-open" type="button" aria-label="Карта заданий"><span id="count">0</span>&thinsp;/&thinsp;<span id="total">0</span></button>
@@ -947,7 +953,7 @@ export function customTestPage(site = {}) {
   <div class="quiz-layout">
     <main class="sheet">
       <section class="intro">
-        <h1 id="custom-heading">🎲 Случайный проверочный тест</h1>
+        <h1 id="custom-heading">Случайный проверочный тест</h1>
         <div class="lead" id="custom-lead">Вариант сгенерирован из общего пула заданий курса дискретной математики.</div>
         <p class="meta" id="custom-meta">Загрузка вопросов…</p>
       </section>
@@ -974,7 +980,7 @@ export function customTestPage(site = {}) {
   <dialog id="sheet-map" class="map-dialog">
     <div class="map-box" style="padding: 1.25rem; max-width: 480px; width: 90vw; background: var(--surface); border-radius: var(--radius-md); border: 1px solid var(--line);">
       <div class="map-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-        <h3 style="margin: 0; font-size: 1.1rem;">🗺️ Карта заданий варианта</h3>
+        <h3 style="margin: 0; font-size: 1.1rem;">Карта заданий варианта</h3>
         <button type="button" class="btn quiet btn-sm" data-close aria-label="Закрыть">✕</button>
       </div>
       <div class="map-grid" id="custom-map-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 0.5rem; margin-top: 0.75rem;"></div>
@@ -996,12 +1002,12 @@ export function leaderboardPage(site = {}) {
   <main class="platform-container">
     <div class="page-header">
       <div class="page-title-wrap">
-        <h1 class="page-title">🏆 Рейтинг студентов курса</h1>
+        <h1 class="page-title">Рейтинг студентов курса</h1>
         <p class="page-subtitle">Сводный рейтинг успеваемости по решению тестов в режиме экзамена и участию в онлайн-контестах на парах.</p>
       </div>
       <div class="page-header-actions">
         <span class="rating-rule-pill" title="100% за тест = 100 pts. Контесты дают дополнительные соревновательные очки">
-          ℹ️ Рейтинговая система ДМ
+          Правила рейтинга ДМ
         </span>
       </div>
     </div>
@@ -1013,7 +1019,7 @@ export function leaderboardPage(site = {}) {
         ${(site.groups || []).map((g) => `<button type="button" class="group-filter-pill" data-group="${esc(g)}">${esc(g)}</button>`).join("")}
       </div>
       <div class="leaderboard-search-box">
-        <input type="search" id="leaderboard-search" class="leaderboard-search-input" placeholder="🔍 Поиск студента по имени...">
+        <input type="search" id="leaderboard-search" class="leaderboard-search-input" placeholder="Поиск студента по имени...">
       </div>
     </div>
 
@@ -1068,6 +1074,12 @@ export function profilePage(site = {}) {
 }
 
 export function contestsPage(site = {}) {
+  const groups = site.groups || ["M3111", "M3112", "M3113", "M3114", "M3115", "M3116", "M3117", "M3118", "M3119", "M3120", "M3121", "M3122", "M3123", "M3124", "M3125", "M3101", "M3102", "M3103"];
+  const groupPills = [
+    `<button type="button" class="btn btn-sm group-filter-pill active" data-group="all">Все группы</button>`,
+    ...groups.map((g) => `<button type="button" class="btn btn-sm quiet group-filter-pill" data-group="${esc(g)}">${esc(g)}</button>`),
+  ].join("\n        ");
+
   return `${head("Онлайн-контесты — Дискретная математика", "../")}
 <body class="platform-body">
   ${navbarHtml("../", "contests", site)}
@@ -1075,8 +1087,18 @@ export function contestsPage(site = {}) {
   <main class="platform-container">
     <div class="page-header">
       <div class="page-title-wrap">
-        <h1 class="page-title">⏱️ Онлайн-контесты и летучки</h1>
+        <h1 class="page-title">Онлайн-контесты и летучки</h1>
         <p class="page-subtitle">Проверочные работы на парах с таймером обратного отсчёта и мгновенной турнирной таблицей результатов.</p>
+      </div>
+    </div>
+
+    <div class="contests-toolbar">
+      <div class="contests-group-filters" id="contests-group-filters">
+        <span class="muted" style="font-size: 0.85rem; font-weight: 600; margin-right: 0.25rem;">Группа:</span>
+        ${groupPills}
+      </div>
+      <div class="contests-search-wrap">
+        <input type="search" id="contests-search-input" class="form-input contests-search-input" placeholder="Поиск по названию работы...">
       </div>
     </div>
 
@@ -1094,7 +1116,7 @@ export function contestsPage(site = {}) {
       <!-- Finished Contests Section -->
       <section class="contests-section" style="margin-top: 2.5rem;">
         <div class="section-title-wrap">
-          <h2 class="section-title">🏁 Завершённые контесты</h2>
+          <h2 class="section-title">Завершённые контесты</h2>
         </div>
         <div class="contests-list" id="finished-contests-list">
           <p class="muted">Загружаем историю контестов…</p>
@@ -1161,11 +1183,11 @@ export function adminPage(site = {}) {
 <body class="admin">
 <header class="topbar admin-topbar" style="display: flex; align-items: center; justify-content: space-between;">
   <div class="admin-brand" style="font-weight: 700; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
-    <span>🎓</span> <span>Кабинет преподавателя</span>
+    <span>Кабинет преподавателя</span>
   </div>
   <div style="display: flex; align-items: center; gap: 0.75rem;">
-    <a href="/" class="btn quiet btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; font-size: 0.82rem;">🏠 На платформу</a>
-    <div class="admin-status-badge" style="font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent);">
+    <a href="/" class="btn quiet btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; font-size: 0.82rem;">На платформу</a>
+    <div class="admin-status-badge" style="font-size: 0.76rem; font-family: var(--mono); font-weight: 600; padding: 0.2rem 0.6rem; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-border);">
       Режим управления
     </div>
   </div>
@@ -1214,7 +1236,7 @@ export function practicesPage(practices = [], site = {}) {
   
   <div class="practices-subbar">
     <div class="practices-subbar-title">
-      <span>📝 Практики и семинары курса</span>
+      <span>Практические занятия</span>
     </div>
     <div class="practices-subbar-controls">
       <div class="group-filter-wrap">
@@ -1232,7 +1254,7 @@ export function practicesPage(practices = [], site = {}) {
   <div class="practices-layout">
     <aside class="practices-sidebar" id="practices-sidebar" aria-label="Список практик">
       <div class="practices-sidebar-header">
-        <input type="search" id="practices-search" class="notes-search-input" placeholder="🔍 Поиск по практикам..." autocomplete="off">
+        <input type="search" id="practices-search" class="notes-search-input" placeholder="Поиск по практикам..." autocomplete="off">
       </div>
       <nav class="practices-list" id="practices-list"></nav>
     </aside>
@@ -1293,7 +1315,7 @@ export function homeworksPage(homeworks = [], site = {}) {
 
   <div class="homeworks-subbar">
     <div class="homeworks-subbar-title">
-      <span>📤 Домашние задания и сдача решений</span>
+      <span>Домашние задания</span>
     </div>
     <div class="homeworks-subbar-controls">
       <div class="group-filter-wrap">
@@ -1311,7 +1333,7 @@ export function homeworksPage(homeworks = [], site = {}) {
   <div class="homeworks-layout">
     <aside class="homeworks-sidebar" id="homeworks-sidebar" aria-label="Список домашних заданий">
       <div class="homeworks-sidebar-header">
-        <input type="search" id="homeworks-search" class="notes-search-input" placeholder="🔍 Поиск по заданиям..." autocomplete="off">
+        <input type="search" id="homeworks-search" class="notes-search-input" placeholder="Поиск по заданиям..." autocomplete="off">
       </div>
       <div class="homeworks-cards-list" id="homeworks-cards-list"></div>
     </aside>

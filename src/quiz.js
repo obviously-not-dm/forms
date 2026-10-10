@@ -225,6 +225,7 @@ function toggleFavorite(qId, btn, article) {
 
 for (const a of articles) {
   const onAnswerChange = () => {
+    if (state.finished) return;
     resetConfirm();
     state.answers[a.dataset.id] = valueOf(a);
     ensureStarted();
@@ -247,12 +248,14 @@ for (const a of articles) {
   }
 
   a.querySelector(".flag-btn").addEventListener("click", () => {
+    if (state.finished) return;
     if (state.flags[a.dataset.id]) delete state.flags[a.dataset.id];
     else state.flags[a.dataset.id] = true;
     persist();
     updateProgress();
   });
   a.querySelector(".clear-btn").addEventListener("click", () => {
+    if (state.finished) return;
     resetConfirm();
     delete state.answers[a.dataset.id];
     applyValue(a, null);
@@ -370,7 +373,7 @@ function applyMode() {
   } else {
     updateSubmitButtons(state.mode === "practice" ? "Завершить" : "Отправить", false);
   }
-  if ($("feedback")) $("feedback").disabled = state.finished;
+  // Поле отзыва остаётся активным и после завершения теста
 }
 
 // ---------- подсказки ----------
@@ -407,7 +410,11 @@ function el(tag, cls, text) {
 
 function lock(article) {
   article.classList.add("locked");
-  for (const i of article.querySelectorAll("input")) i.disabled = true;
+  for (const i of article.querySelectorAll("input, button, textarea")) {
+    if (!i.classList.contains("favorite-btn")) {
+      i.disabled = true;
+    }
+  }
 }
 
 function showReview(article, q, expand = false) {
@@ -654,7 +661,11 @@ async function save() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(attemptPayload),
     });
-    if (res.ok) serverSaved = true;
+    if (res.ok) {
+      serverSaved = true;
+      const data = await res.json().catch(() => null);
+      if (data?.id) lastSavedAttemptId = data.id;
+    }
   } catch {}
 
   // 3. Если дополнительно сконфигурирован Supabase — дублируем и туда
@@ -969,10 +980,60 @@ if (zoom) {
   zoom.addEventListener("click", () => zoom.close?.());
 }
 
+let lastSavedAttemptId = null;
+
 const feedback = $("feedback");
+const btnSendFeedback = $("btn-send-feedback");
+const feedbackStatus = $("feedback-status");
+
+async function sendFeedbackNow() {
+  if (!feedback) return;
+  const text = feedback.value.trim();
+  if (!text) return;
+  state.feedback = text;
+  persist();
+
+  if (btnSendFeedback) btnSendFeedback.disabled = true;
+
+  try {
+    const res = await fetch("/api/attempts/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: lastSavedAttemptId,
+        quiz_id: testId,
+        feedback: text,
+      }),
+    });
+    if (res.ok) {
+      if (feedbackStatus) {
+        feedbackStatus.hidden = false;
+        feedbackStatus.textContent = "✓ Отзыв отправлен! Спасибо за обратную связь.";
+        setTimeout(() => {
+          if (feedbackStatus) feedbackStatus.hidden = true;
+        }, 5000);
+      }
+    }
+  } catch {} finally {
+    if (btnSendFeedback) btnSendFeedback.disabled = false;
+  }
+}
+
 if (feedback) {
-  feedback.value = state.feedback;
-  feedback.addEventListener("input", () => { state.feedback = feedback.value; persist(); });
+  feedback.value = state.feedback || "";
+  feedback.addEventListener("input", () => {
+    state.feedback = feedback.value;
+    persist();
+  });
+  feedback.addEventListener("change", () => {
+    if (state.finished) sendFeedbackNow();
+  });
+}
+
+if (btnSendFeedback) {
+  btnSendFeedback.addEventListener("click", () => {
+    sendFeedbackNow();
+  });
 }
 
 // ---------- восстановление ----------

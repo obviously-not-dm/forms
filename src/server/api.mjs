@@ -13,6 +13,7 @@ import {
   deleteTest,
   getAttempts,
   saveAttempt,
+  saveAttemptFeedback,
   clearAttempts,
   getStats,
   clearStats,
@@ -21,6 +22,7 @@ import {
   saveColloquiumQuestion,
   deleteColloquiumQuestion,
   createUser,
+  normalizeGroupName,
   getUserById,
   getUserByEmail,
   verifyUserCredentials,
@@ -54,12 +56,13 @@ import {
   getAllHomeworkSubmissions,
   reviewHomeworkSubmission,
 } from "./db.mjs";
-import { saveUploadedPdf, getPdfFilePath, isValidPdf } from "./storage.mjs";
+import { saveUploadedPdf, getPdfFilePath, isValidPdf, saveUploadedImage, getImageFilePath } from "./storage.mjs";
 import { serializeTest, parseTest, serializeNote, parseNote, build } from "../compiler/builder.mjs";
 import { renderMarkdown } from "../compiler/markdown.mjs";
 import { grade } from "../grade.js";
 
 const CONTENT = path.resolve("content");
+const DIST = path.resolve("dist");
 
 const activeSessions = new Map();
 
@@ -340,13 +343,13 @@ export async function handleApi(req, res, pathname) {
       const email = String(body.email || "").trim();
       const password = String(body.password || "");
       const name = String(body.name || "").trim();
-      const group = String(body.group || body.group_name || "").trim().toUpperCase();
+      const group = normalizeGroupName(body.group || body.group_name || "");
 
       if (!email || !email.includes("@")) {
         return sendJson(res, 400, { error: "Введите корректный email адрес" });
       }
-      if (!password || password.length < 4) {
-        return sendJson(res, 400, { error: "Пароль должен содержать не менее 4 символов" });
+      if (!password || password.length < 6) {
+        return sendJson(res, 400, { error: "Пароль должен содержать не менее 6 символов" });
       }
       if (!name || name.length < 2) {
         return sendJson(res, 400, { error: "Введите ваши имя и фамилию" });
@@ -374,8 +377,8 @@ export async function handleApi(req, res, pathname) {
       if (!email || !email.includes("@")) {
         return sendJson(res, 400, { error: "Введите корректный email адрес" });
       }
-      if (!newPassword || newPassword.length < 4) {
-        return sendJson(res, 400, { error: "Новый пароль должен содержать не менее 4 символов" });
+      if (!newPassword || newPassword.length < 6) {
+        return sendJson(res, 400, { error: "Новый пароль должен содержать не менее 6 символов" });
       }
 
       try {
@@ -836,6 +839,20 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       return sendJson(res, 200, { ok: true, attempt, id: attempt.id });
     }
 
+    // POST /api/attempts/feedback
+    if ((normPath === "/api/attempts/feedback" || normPath === "/api/feedback") && method === "POST") {
+      const body = await readBody(req);
+      const sess = getSession(req);
+      const userId = sess?.userId || body.user_id || null;
+      const feedback = saveAttemptFeedback({
+        id: body.id || body.attempt_id,
+        quiz_id: body.quiz_id || body.test_id,
+        user_id: userId,
+        feedback: body.feedback,
+      });
+      return sendJson(res, 200, { ok: true, feedback });
+    }
+
     // DELETE /api/attempts (and /api/stats)
     if ((normPath === "/api/attempts" || normPath === "/api/stats") && method === "DELETE") {
       const url = new URL(req.url, "http://localhost");
@@ -947,16 +964,27 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
         return sendJson(res, 401, { error: "Для сдачи контеста необходимо войти в аккаунт" });
       }
 
-      // Grade against key.json
-      const keyPath = path.join(CONTENT, contest.test_id, "key.json");
+      // Grade against keyJson from DB or key.json from dist / content
+      const testObj = getTestById(contest.test_id);
+      let keyData = testObj?.keyJson || null;
+      if (!keyData) {
+        const distKeyPath = path.join(DIST, contest.test_id, "key.json");
+        const contentKeyPath = path.join(CONTENT, contest.test_id, "key.json");
+        const targetPath = fs.existsSync(distKeyPath) ? distKeyPath : (fs.existsSync(contentKeyPath) ? contentKeyPath : null);
+        if (targetPath) {
+          try {
+            keyData = JSON.parse(fs.readFileSync(targetPath, "utf8"));
+          } catch {}
+        }
+      }
+
       let score = 0;
       let maxScore = 0;
       let results = {};
 
-      if (fs.existsSync(keyPath)) {
+      if (keyData && Array.isArray(keyData.questions)) {
         try {
-          const keyData = JSON.parse(fs.readFileSync(keyPath, "utf8"));
-          const graded = grade(keyData.questions || [], body.answers || {});
+          const graded = grade(keyData.questions, body.answers || {});
           score = graded.score;
           maxScore = graded.max;
           results = graded.results;
@@ -1019,15 +1047,25 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
     if (normPath === "/api/practices" && method === "GET") {
       const sess = getSession(req);
       const isTeacher = sess?.role === "admin" || sess?.role === "teacher";
+      const isStudent = Boolean(sess?.userId && !isTeacher);
       const studentGroup = sess?.userObj?.group_name;
-      const targetGroup = groupParam || (!isTeacher ? studentGroup : null);
-      const includeUnpublished = isTeacher && parsedUrl.searchParams.get("all") === "1";
+      const isGuest = !sess?.userId && !isTeacher;
 
-      const practices = getAllPractices({ group: targetGroup, includeUnpublished: isTeacher }).map((p) => ({
+      let targetGroup = null;
+      let onlyAll = false;
+      if (isTeacher) {
+        targetGroup = groupParam;
+      } else if (isStudent) {
+        targetGroup = studentGroup || "__all_only__";
+      } else {
+        onlyAll = true;
+      }
+
+      const practices = getAllPractices({ group: targetGroup, includeUnpublished: isTeacher, onlyAll }).map((p) => ({
         ...p,
         html: renderMarkdown(p.content || "").html,
       }));
-      return sendJson(res, 200, { practices });
+      return sendJson(res, 200, { practices, is_guest: isGuest, current_group: studentGroup || null });
     }
 
     const practiceItemMatch = normPath.match(/^\/api\/practices\/([^/?#]+)$/);
@@ -1035,6 +1073,21 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       const practiceId = decodeURIComponent(practiceItemMatch[1]).trim();
       const practice = getPracticeById(practiceId);
       if (!practice) return sendJson(res, 404, { error: "Практика не найдена" });
+      const sess = getSession(req);
+      const isTeacher = sess?.role === "admin" || sess?.role === "teacher";
+      const studentGroup = sess?.userObj?.group_name;
+      const pGroups = practice.groups || [practice.group_name || "all"];
+      const isPublic = pGroups.includes("all");
+
+      if (!isTeacher && !isPublic) {
+        if (!sess?.userId) {
+          return sendJson(res, 401, { error: "Для доступа к данной практике необходимо войти в аккаунт", require_auth: true });
+        }
+        if (!studentGroup || !pGroups.includes(studentGroup)) {
+          return sendJson(res, 403, { error: "Практика назначена другой группе" });
+        }
+      }
+
       return sendJson(res, 200, {
         practice: {
           ...practice,
@@ -1084,15 +1137,26 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
     if (normPath === "/api/homeworks" && method === "GET") {
       const sess = getSession(req);
       const isTeacher = sess?.role === "admin" || sess?.role === "teacher";
+      const isStudent = Boolean(sess?.userId && !isTeacher);
       const studentGroup = sess?.userObj?.group_name;
-      const targetGroup = groupParam || (!isTeacher ? studentGroup : null);
       const userId = sess?.userId || sess?.userObj?.id || null;
+      const isGuest = !sess?.userId && !isTeacher;
 
-      const homeworks = getAllHomeworks({ group: targetGroup, includeUnpublished: isTeacher, userId }).map((h) => ({
+      let targetGroup = null;
+      let onlyAll = false;
+      if (isTeacher) {
+        targetGroup = groupParam;
+      } else if (isStudent) {
+        targetGroup = studentGroup || "__all_only__";
+      } else {
+        onlyAll = true;
+      }
+
+      const homeworks = getAllHomeworks({ group: targetGroup, includeUnpublished: isTeacher, userId, onlyAll }).map((h) => ({
         ...h,
         html: renderMarkdown(h.content || "").html,
       }));
-      return sendJson(res, 200, { homeworks });
+      return sendJson(res, 200, { homeworks, is_guest: isGuest, current_group: studentGroup || null });
     }
 
     const homeworkItemMatch = normPath.match(/^\/api\/homeworks\/([^/?#]+)$/);
@@ -1102,6 +1166,20 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       const userId = sess?.userId || sess?.userObj?.id || null;
       const homework = getHomeworkById(hwId, userId);
       if (!homework) return sendJson(res, 404, { error: "Домашнее задание не найдено" });
+      const isTeacher = sess?.role === "admin" || sess?.role === "teacher";
+      const studentGroup = sess?.userObj?.group_name;
+      const hGroups = homework.groups || [homework.group_name || "all"];
+      const isPublic = hGroups.includes("all");
+
+      if (!isTeacher && !isPublic) {
+        if (!sess?.userId) {
+          return sendJson(res, 401, { error: "Для доступа к данному домашнему заданию необходимо войти в аккаунт", require_auth: true });
+        }
+        if (!studentGroup || !hGroups.includes(studentGroup)) {
+          return sendJson(res, 403, { error: "Задание назначено другой группе" });
+        }
+      }
+
       return sendJson(res, 200, {
         homework: {
           ...homework,
@@ -1270,6 +1348,59 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
         "Content-Type": "application/pdf",
         "Content-Length": stat.size,
         "Content-Disposition": `inline; filename="${encodeURIComponent(path.basename(filePath))}"`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      if (typeof res.on === "function" && typeof res.emit === "function") {
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        res.end(fs.readFileSync(filePath));
+      }
+      return;
+    }
+
+    // ----------------------------------------------------
+    // IMAGE UPLOADS FOR ADMIN EDITORS
+    // ----------------------------------------------------
+    if (normPath === "/api/admin/upload-image" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Только преподаватель может загружать изображения" });
+      }
+      const body = await readBody(req);
+      if (!body.data) {
+        return sendJson(res, 400, { error: "Ожидаются данные изображения (data в base64)" });
+      }
+      const originalFilename = body.filename || "image.png";
+      const base64Data = String(body.data).replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      const result = saveUploadedImage(originalFilename, buffer);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, filename: result.filename, url: result.url });
+    }
+
+    const imageFileMatch = normPath.match(/^\/api\/uploads\/images\/([^/?#]+)$/);
+    if (imageFileMatch && method === "GET") {
+      const filename = decodeURIComponent(imageFileMatch[1]).trim();
+      const filePath = getImageFilePath(filename);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return sendJson(res, 404, { error: "Изображение не найдено" });
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const mimes = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+      };
+      const contentType = mimes[ext] || "image/png";
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Content-Length": stat.size,
+        "Cache-Control": "public, max-age=86400",
         "Access-Control-Allow-Origin": "*",
       });
       if (typeof res.on === "function" && typeof res.emit === "function") {

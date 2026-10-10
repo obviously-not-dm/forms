@@ -36,7 +36,7 @@ class HomeworksApp {
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     try {
-      const sessRes = await fetch("/api/auth/session", { headers });
+      const sessRes = await fetch("/api/auth/session", { headers, credentials: "same-origin" });
       if (sessRes.ok) {
         const sessData = await sessRes.json();
         if (sessData.authenticated && sessData.user) {
@@ -49,7 +49,7 @@ class HomeworksApp {
     } catch {}
 
     try {
-      const hwRes = await fetch("/api/homeworks", { headers });
+      const hwRes = await fetch("/api/homeworks", { headers, credentials: "same-origin" });
       if (hwRes.ok) {
         const hwData = await hwRes.json();
         if (Array.isArray(hwData.homeworks) && hwData.homeworks.length > 0) {
@@ -90,11 +90,29 @@ class HomeworksApp {
 
   getFilteredHomeworks() {
     return this.homeworks.filter((h) => {
-      if (this.selectedGroup && this.selectedGroup !== "all") {
-        if (h.group_name && h.group_name !== "all" && h.group_name !== this.selectedGroup) {
+      const hGroups = Array.isArray(h.groups) && h.groups.length > 0
+        ? h.groups
+        : (h.group_name ? h.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+      const isPublic = hGroups.includes("all");
+
+      // 1. Unregistered guest: ONLY public homeworks visible
+      if (!this.currentUser) {
+        if (!isPublic) return false;
+      } else if (this.currentUser.role !== "admin" && this.currentUser.role !== "teacher") {
+        // 2. Student: only public OR student's own group
+        const myGroup = this.currentUser.group_name;
+        if (!isPublic && (!myGroup || !hGroups.includes(myGroup))) {
           return false;
         }
+      } else {
+        // 3. Teacher: can filter by selectedGroup
+        if (this.selectedGroup && this.selectedGroup !== "all") {
+          if (!hGroups.includes("all") && !hGroups.includes(this.selectedGroup)) {
+            return false;
+          }
+        }
       }
+
       if (this.searchQuery) {
         const matchTitle = (h.title || "").toLowerCase().includes(this.searchQuery);
         const matchTopic = (h.topic || "").toLowerCase().includes(this.searchQuery);
@@ -118,20 +136,45 @@ class HomeworksApp {
     }
   }
 
+  formatGroupBadge(hw) {
+    const hGroups = Array.isArray(hw.groups) && hw.groups.length > 0
+      ? hw.groups
+      : (hw.group_name ? hw.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+    if (hGroups.includes("all")) {
+      return `<span class="badge badge-group-info">Все группы</span>`;
+    }
+    if (hGroups.length > 2) {
+      return `<span class="badge badge-group-info" title="Группы: ${this.esc(hGroups.join(', '))}">Группы: ${this.esc(hGroups.slice(0, 2).join(', '))} +${hGroups.length - 2}</span>`;
+    }
+    return `<span class="badge badge-group-info" title="Группы: ${this.esc(hGroups.join(', '))}">Группа: ${this.esc(hGroups.join(', '))}</span>`;
+  }
+
   renderList() {
     const listEl = document.getElementById("homeworks-cards-list");
     if (!listEl) return;
 
     const filtered = this.getFilteredHomeworks();
+
+    let guestNotice = "";
+    if (!this.currentUser) {
+      guestNotice = `
+        <div class="auth-callout-banner" style="background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 0.75rem 0.85rem; margin-bottom: 0.85rem; font-size: 0.82rem; line-height: 1.4;">
+          <strong>Вы не вошли в аккаунт</strong><br>
+          Показаны только общие задания курса. <a href="#" onclick="document.getElementById('btn-auth-open')?.click(); return false;" style="font-weight: 600; text-decoration: underline; color: var(--accent-ink);">Войдите</a>, чтобы увидеть ДЗ вашей группы.
+        </div>
+      `;
+    }
+
     if (filtered.length === 0) {
       listEl.innerHTML = `
+        ${guestNotice}
         <div style="padding: 1.5rem; text-align: center; color: var(--muted); font-size: 0.9rem;">
-          Домашних заданий не найдено
+          Домашних заданий для выбранной группы не найдено
         </div>`;
       return;
     }
 
-    let html = "";
+    let html = guestNotice;
     for (const hw of filtered) {
       const isActive = hw.id === this.selectedId;
       const sub = hw.user_submission;
@@ -142,9 +185,9 @@ class HomeworksApp {
         if (sub.status === "passed") {
           statusBadge = `<span class="hw-status-badge status-passed">Зачёт · ${sub.score}/${hw.max_score}</span>`;
         } else if (sub.status === "pending") {
-          statusBadge = `<span class="hw-status-badge status-pending">На проверке ⏳</span>`;
+          statusBadge = `<span class="hw-status-badge status-pending">На проверке</span>`;
         } else if (sub.status === "revise") {
-          statusBadge = `<span class="hw-status-badge status-revise">На доработке ⚠️</span>`;
+          statusBadge = `<span class="hw-status-badge status-revise">На доработке</span>`;
         } else if (sub.status === "failed") {
           statusBadge = `<span class="hw-status-badge status-failed">Незачёт · ${sub.score}/${hw.max_score}</span>`;
         }
@@ -156,12 +199,12 @@ class HomeworksApp {
       html += `
         <button type="button" class="hw-nav-card ${isActive ? "active" : ""}" data-id="${this.esc(hw.id)}">
           <div class="hw-card-top">
-            <span class="hw-card-topic">📌 ${this.esc(hw.topic || "Общее")}</span>
+            <span class="hw-card-topic">§ ${this.esc(hw.topic || "Общее")}</span>
             ${deadlineInfo}
           </div>
           <div class="hw-card-title">${this.esc(hw.title)}</div>
           <div class="hw-card-footer">
-            <span class="hw-max-score">Макс: ${hw.max_score} б.</span>
+            <span class="hw-max-score">${hw.max_score} pts</span>
             ${statusBadge}
           </div>
         </button>
@@ -206,24 +249,27 @@ class HomeworksApp {
       return;
     }
 
-    const sub = hw.user_submission;
-    const groupLabel = hw.group_name && hw.group_name !== "all"
-      ? `Группа: ${this.esc(hw.group_name)}`
-      : "Для всех групп";
+    const hGroups = Array.isArray(hw.groups) && hw.groups.length > 0
+      ? hw.groups
+      : (hw.group_name ? hw.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+    const groupLabel = hGroups.includes("all")
+      ? "Для всех групп"
+      : `Группы: ${hGroups.join(", ")}`;
 
     const contentHtml = hw.html || (hw.content ? this.renderFallbackMd(hw.content) : "<p>Условия задач отсутствуют.</p>");
+    const sub = hw.user_submission || null;
 
     // Submission section HTML
     let submissionHtml = "";
     if (!this.currentUser) {
       submissionHtml = `
         <div class="hw-auth-callout">
-          <div class="hw-auth-callout-icon">🔒</div>
+          <div class="hw-auth-callout-icon" style="font-family: var(--font-mono); font-size: 1.2rem; color: var(--accent); font-weight: 700;">[!]</div>
           <div class="hw-auth-callout-text">
             <h3>Требуется авторизация</h3>
             <p>Чтобы отправить выполненное домашнее задание на проверку, пожалуйста, войдите под своим аккаунтом студента.</p>
             <button type="button" class="btn primary" onclick="document.getElementById('btn-auth-open')?.click()">
-              👤 Войти в систему
+              Войти в систему
             </button>
           </div>
         </div>
@@ -235,13 +281,13 @@ class HomeworksApp {
         const dateStr = sub.submitted_at ? new Date(sub.submitted_at).toLocaleString("ru-RU") : "";
         let verdictBadge = "";
         if (sub.status === "passed") {
-          verdictBadge = `<span class="badge badge-success" style="font-size: 0.95rem; padding: 0.35rem 0.75rem;">✅ Зачёт (${sub.score} / ${hw.max_score} баллов)</span>`;
+          verdictBadge = `<span class="badge badge-success" style="font-size: 0.85rem; padding: 0.3rem 0.6rem; font-family: var(--font-mono);">Зачёт (${sub.score} / ${hw.max_score} баллов)</span>`;
         } else if (sub.status === "pending") {
-          verdictBadge = `<span class="badge badge-warning" style="font-size: 0.95rem; padding: 0.35rem 0.75rem;">⏳ На проверке у преподавателя</span>`;
+          verdictBadge = `<span class="badge badge-warning" style="font-size: 0.85rem; padding: 0.3rem 0.6rem; font-family: var(--font-mono);">На проверке у преподавателя</span>`;
         } else if (sub.status === "revise") {
-          verdictBadge = `<span class="badge badge-warning" style="font-size: 0.95rem; padding: 0.35rem 0.75rem;">⚠️ Требуется доработка</span>`;
+          verdictBadge = `<span class="badge badge-warning" style="font-size: 0.85rem; padding: 0.3rem 0.6rem; font-family: var(--font-mono);">Требуется доработка</span>`;
         } else if (sub.status === "failed") {
-          verdictBadge = `<span class="badge badge-danger" style="font-size: 0.95rem; padding: 0.35rem 0.75rem;">❌ Незачёт (${sub.score} / ${hw.max_score} баллов)</span>`;
+          verdictBadge = `<span class="badge badge-danger" style="font-size: 0.85rem; padding: 0.3rem 0.6rem; font-family: var(--font-mono);">Незачёт (${sub.score} / ${hw.max_score} баллов)</span>`;
         }
 
         const fileDownloadUrl = `/api/uploads/homeworks/${encodeURIComponent(sub.file_path)}`;
@@ -249,17 +295,17 @@ class HomeworksApp {
         subStatusBlock = `
           <div class="hw-current-submission-card">
             <div class="hw-sub-header">
-              <span class="hw-sub-title">Ваша отправленная работа</span>
+              <span class="hw-sub-title">Отправленная работа</span>
               ${verdictBadge}
             </div>
             <div class="hw-sub-details">
-              <div><strong>Файл:</strong> <a href="${fileDownloadUrl}" target="_blank" rel="noopener" class="hw-file-link">📄 ${this.esc(sub.file_name)}</a></div>
+              <div><strong>Файл:</strong> <a href="${fileDownloadUrl}" target="_blank" rel="noopener" class="hw-file-link">${this.esc(sub.file_name)}</a></div>
               <div><strong>Дата отправки:</strong> ${dateStr}</div>
               ${sub.reviewed_at ? `<div><strong>Дата проверки:</strong> ${new Date(sub.reviewed_at).toLocaleString("ru-RU")}</div>` : ""}
             </div>
             ${sub.teacher_comment ? `
               <div class="hw-teacher-feedback">
-                <div class="feedback-title">💬 Комментарий преподавателя:</div>
+                <div class="feedback-title">Комментарий преподавателя:</div>
                 <div class="feedback-text">${this.esc(sub.teacher_comment)}</div>
               </div>
             ` : ""}
@@ -270,20 +316,20 @@ class HomeworksApp {
       submissionHtml = `
         ${subStatusBlock}
         <div class="hw-upload-card">
-          <h3 class="hw-upload-title">${sub ? "🔄 Загрузить новую версию работы (PDF)" : "📤 Загрузка решения (PDF)"}</h3>
+          <h3 class="hw-upload-title">${sub ? "Загрузить новую версию работы (PDF)" : "Загрузка решения (PDF)"}</h3>
           <p class="hw-upload-desc">Загрузите файл строго в формате <strong>PDF</strong> (до 25 МБ). При повторной загрузке файл будет перезаписан.</p>
 
           <div class="pdf-dropzone" id="pdf-dropzone">
             <input type="file" id="pdf-file-input" accept=".pdf,application/pdf" style="display: none;">
             <div class="dropzone-content" id="dropzone-content">
-              <span class="dropzone-icon">📄</span>
+              <span class="dropzone-icon" style="font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent);">[PDF]</span>
               <span class="dropzone-text">Перетащите PDF сюда или <strong style="color: var(--accent); cursor: pointer;">выберите файл</strong></span>
               <span class="dropzone-limit">Максимальный размер: 25 МБ</span>
             </div>
           </div>
 
           <div class="selected-file-row" id="selected-file-row" hidden>
-            <span class="file-icon">📎</span>
+            <span class="file-icon" style="font-family: var(--font-mono); color: var(--accent);">PDF</span>
             <span class="file-name" id="selected-file-name"></span>
             <span class="file-size" id="selected-file-size"></span>
             <button type="button" class="btn quiet btn-sm file-remove-btn" id="btn-remove-file" title="Удалить">✕</button>
@@ -292,7 +338,7 @@ class HomeworksApp {
           <div class="upload-action-row">
             <div id="upload-feedback" class="upload-feedback" hidden></div>
             <button type="button" class="btn primary" id="btn-submit-hw" disabled>
-              🚀 Отправить на проверку
+              Отправить на проверку
             </button>
           </div>
         </div>
@@ -302,9 +348,9 @@ class HomeworksApp {
     detailEl.innerHTML = `
       <header class="hw-detail-header">
         <div class="hw-meta-row">
-          <span class="badge badge-topic">📌 ${this.esc(hw.topic || "Общее")}</span>
-          <span class="badge badge-group-info">👥 ${this.esc(groupLabel)}</span>
-          <span class="badge badge-score">⭐ Макс. балл: ${hw.max_score}</span>
+          <span class="badge badge-topic">§ ${this.esc(hw.topic || "Общее")}</span>
+          <span class="badge badge-group-info">${this.esc(groupLabel)}</span>
+          <span class="badge badge-score">макс: ${hw.max_score} pts</span>
           ${this.formatDeadlineToBadge(hw.deadline, true)}
         </div>
         <h1 class="hw-main-title">${this.esc(hw.title)}</h1>
@@ -320,16 +366,25 @@ class HomeworksApp {
     `;
 
     // Render KaTeX in formulas
-    if (window.renderMathInElement) {
-      try {
-        window.renderMathInElement(detailEl, {
-          delimiters: [
-            { left: "$$", right: "$$", display: true },
-            { left: "$", right: "$", display: false },
-          ],
-          throwOnError: false,
-        });
-      } catch {}
+    const applyMath = () => {
+      if (window.renderMathInElement) {
+        try {
+          window.renderMathInElement(detailEl, {
+            delimiters: [
+              { left: "$$", right: "$$", display: true },
+              { left: "\\[", right: "\\]", display: true },
+              { left: "$", right: "$", display: false },
+              { left: "\\(", right: "\\)", display: false },
+            ],
+            ignoredTags: ["script", "noscript", "style", "textarea", "pre"],
+            throwOnError: false,
+          });
+        } catch {}
+      }
+    };
+    applyMath();
+    if (!window.renderMathInElement) {
+      setTimeout(applyMath, 150);
     }
 
     this.bindUploadEvents();
@@ -490,16 +545,20 @@ class HomeworksApp {
       const diffMs = d - now;
       const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-      const dateStr = d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) +
-        " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      const timeStr = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      const shortDate = `${d.getDate()} ${d.toLocaleString("ru-RU", { month: "short" })}`;
+      const fullDate = `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" })} ${timeStr}`;
 
       if (diffMs < 0) {
-        return `<span class="badge badge-deadline badge-expired" title="Дедлайн: ${dateStr}">⌛ Дедлайн прошёл</span>`;
+        return `<span class="badge badge-deadline badge-expired" title="Дедлайн: ${fullDate}">Просрочено</span>`;
       }
       if (diffDays <= 3) {
-        return `<span class="badge badge-deadline badge-urgent" title="Дедлайн: ${dateStr}">⏳ Осталось ${diffDays} дн.</span>`;
+        return `<span class="badge badge-deadline badge-urgent" title="Дедлайн: ${fullDate}">Осталось ${diffDays} дн.</span>`;
       }
-      return `<span class="badge badge-deadline badge-normal" title="Дедлайн: ${dateStr}">🗓️ До ${dateStr}</span>`;
+      if (!detailed) {
+        return `<span class="badge badge-deadline badge-normal" title="Дедлайн: ${fullDate}">до ${shortDate}</span>`;
+      }
+      return `<span class="badge badge-deadline badge-normal" title="Дедлайн: ${fullDate}">до ${fullDate}</span>`;
     } catch {
       return "";
     }
@@ -513,7 +572,7 @@ class HomeworksApp {
     // Preserve block formulas $$...$$
     text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
       const key = `%%MATH_BLOCK_${mathCounter++}%%`;
-      let rendered = `<div class="katex-display">$$${tex}$$</div>`;
+      let rendered = `$$${tex}$$`;
       if (window.katex) {
         try {
           rendered = `<div class="katex-display">${window.katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false })}</div>`;
@@ -524,9 +583,9 @@ class HomeworksApp {
     });
 
     // Preserve inline formulas $...$
-    text = text.replace(/(?<!\\)\$([^\n$]+?)(?<!\\)\$/g, (_, tex) => {
+    text = text.replace(/\$([^\$\n]+?)\$/g, (_, tex) => {
       const key = `%%MATH_INLINE_${mathCounter++}%%`;
-      let rendered = `<code>$${tex}$</code>`;
+      let rendered = `$${tex}$`;
       if (window.katex) {
         try {
           rendered = window.katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });

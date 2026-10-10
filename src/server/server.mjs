@@ -86,7 +86,7 @@ export function serve(options = {}) {
     if (ext === ".woff2" || ext === ".woff" || ext === ".ttf") {
       cacheControl = "public, max-age=31536000, immutable";
     } else if (ext === ".css" || ext === ".js") {
-      cacheControl = "public, max-age=3600, stale-while-revalidate=86400";
+      cacheControl = "no-cache, must-revalidate";
     } else if (ext === ".png" || ext === ".jpg" || ext === ".svg" || ext === ".webp" || ext === ".ico") {
       cacheControl = "public, max-age=86400";
     }
@@ -125,12 +125,33 @@ export function serve(options = {}) {
     }, 150);
   };
 
-  if (fs.existsSync(CONTENT)) {
-    fs.watch(CONTENT, { recursive: true }, rebuild);
-  }
-  if (fs.existsSync(SRC)) {
-    fs.watch(SRC, { recursive: true }, rebuild);
-  }
+  const watchDirSafe = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    try {
+      fs.watch(dir, { recursive: true }, rebuild);
+    } catch {
+      // Fallback for Linux or platforms without recursive fs.watch support
+      try {
+        fs.watch(dir, rebuild);
+        const walk = (d) => {
+          try {
+            const entries = fs.readdirSync(d, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory()) {
+                const sub = path.join(d, entry.name);
+                try { fs.watch(sub, rebuild); } catch {}
+                walk(sub);
+              }
+            }
+          } catch {}
+        };
+        walk(dir);
+      } catch {}
+    }
+  };
+
+  watchDirSafe(CONTENT);
+  watchDirSafe(SRC);
 
   return server;
 }

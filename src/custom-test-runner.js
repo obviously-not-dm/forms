@@ -188,6 +188,8 @@ async function initCustomTestRunner() {
     });
   }
 
+  let isFinished = false;
+
   // 7. Обновление прогресса
   function updateProgress() {
     let answered = 0;
@@ -212,6 +214,7 @@ async function initCustomTestRunner() {
 
   // 8. Сбор ответов
   function collectAnswers() {
+    if (isFinished) return;
     questionsWrap.querySelectorAll("article.q").forEach((art) => {
       const qKey = art.dataset.key;
       const type = art.dataset.type;
@@ -238,11 +241,14 @@ async function initCustomTestRunner() {
 
   questionsWrap.addEventListener("input", collectAnswers);
   questionsWrap.addEventListener("change", collectAnswers);
-  window.addEventListener("beforeunload", collectAnswers);
+  window.addEventListener("beforeunload", () => {
+    if (!isFinished) collectAnswers();
+  });
 
   // 9. Очистка ответа
   questionsWrap.querySelectorAll(".clear-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (isFinished) return;
       const art = btn.closest("article.q");
       const qKey = art.dataset.key;
       delete userAnswers[qKey];
@@ -270,8 +276,76 @@ async function initCustomTestRunner() {
     return false;
   }
 
+  function renderQuestionReview(art, q, userVal, isFinal = false) {
+    const correct = gradeQuestion(q, userVal);
+    art.classList.toggle("is-right", correct);
+    art.classList.toggle("is-wrong", !correct);
+
+    // Подсветка вариантов
+    if (q.type !== "text" && Array.isArray(q.options)) {
+      const correctIdxs = new Set(
+        q.key && Array.isArray(q.key.answer)
+          ? q.key.answer
+          : q.options.map((o, i) => (o.correct ? i : null)).filter((x) => x !== null)
+      );
+      const chosen = new Set(q.type === "single" ? [userVal] : Array.isArray(userVal) ? userVal : []);
+
+      art.querySelectorAll(".opt").forEach((optEl, i) => {
+        const isKey = correctIdxs.has(i);
+        optEl.classList.toggle("key", isKey);
+        optEl.classList.toggle("miss", chosen.has(i) && !isKey);
+
+        optEl.querySelector(".opt-note")?.remove();
+        const note = q.optionNotesHtml?.[i] || q.options[i]?.note;
+        if (note && (chosen.has(i) || isKey)) {
+          const noteDiv = document.createElement("div");
+          noteDiv.className = "opt-note";
+          noteDiv.innerHTML = typeof note === "string" ? note : Array.isArray(note) ? note.join("<br>") : "";
+          optEl.querySelector(".opt-body")?.append(noteDiv);
+        }
+      });
+    } else if (q.type === "text") {
+      const inp = art.querySelector(".text-input");
+      if (inp) {
+        inp.classList.remove("right", "wrong");
+        inp.classList.add(correct ? "right" : "wrong");
+      }
+    }
+
+    const rev = art.querySelector(".review");
+    if (rev) {
+      rev.hidden = false;
+      let reviewContent = "";
+
+      const answered = isAnswered(q.type, userVal);
+      reviewContent += `<p class="feedback-msg ${correct ? 'ok' : 'bad'}" style="margin: 0.5rem 0 0.25rem; font-weight: 600;">
+        ${correct ? '✅ Верно!' : answered ? '❌ Неверно.' : '⚠️ Нет ответа.'}
+      </p>`;
+
+      if (!correct && q.type !== "text" && Array.isArray(q.options)) {
+        const correctLetters = q.options
+          .map((o, i) => (o.correct || (q.key?.answer && q.key.answer.includes(i)) ? LETTERS[i] || String(i + 1) : null))
+          .filter(Boolean);
+        if (correctLetters.length) {
+          reviewContent += `<p class="key-line" style="margin: 0.25rem 0; font-size: 0.92rem;"><strong>Правильный ответ:</strong> ${correctLetters.join(", ")}</p>`;
+        }
+      }
+
+      if (q.explanationHtml) {
+        reviewContent += `<div class="hints-box" style="margin-top: 0.5rem; font-size: 0.9rem; background: var(--surface-subtle); padding: 0.75rem; border-radius: 6px;">💡 <strong>Разбор:</strong> ${q.explanationHtml}</div>`;
+      } else if (Array.isArray(q.hintsHtml) && q.hintsHtml.length > 0) {
+        reviewContent += `<div class="hints-box" style="margin-top: 0.5rem; font-size: 0.9rem; background: var(--surface-subtle); padding: 0.75rem; border-radius: 6px;">💡 <strong>Пояснение:</strong> ${q.hintsHtml.join("<hr>")}</div>`;
+      }
+
+      rev.innerHTML = reviewContent;
+    }
+
+    return correct;
+  }
+
   questionsWrap.querySelectorAll(".practice-check-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (isFinished) return;
       const qKey = btn.dataset.key;
       const art = document.getElementById(`q-${qKey}`);
       if (!art) return;
@@ -285,24 +359,7 @@ async function initCustomTestRunner() {
         return;
       }
 
-      const correct = gradeQuestion(q, userVal);
-      art.classList.toggle("is-right", correct);
-      art.classList.toggle("is-wrong", !correct);
-
-      const rev = art.querySelector(".review");
-      if (rev) {
-        rev.hidden = false;
-        let hintsStr = "";
-        if (Array.isArray(q.hintsHtml) && q.hintsHtml.length > 0) {
-          hintsStr = `<div class="hints-box" style="margin-top: 0.5rem; font-size: 0.9rem; background: var(--surface-subtle); padding: 0.75rem; border-radius: 6px;">💡 <strong>Пояснение:</strong> ${q.hintsHtml.join("<hr>")}</div>`;
-        }
-        rev.innerHTML = `
-          <p class="feedback-msg ${correct ? 'ok' : 'bad'}" style="margin: 0.5rem 0 0.25rem;">
-            ${correct ? '✅ Верно!' : '❌ Неверно.'}
-          </p>
-          ${hintsStr}
-        `;
-      }
+      renderQuestionReview(art, q, userVal, false);
     });
   });
 
@@ -340,41 +397,38 @@ async function initCustomTestRunner() {
   // 12. Финальная проверка теста
   if (submitBtn) {
     submitBtn.addEventListener("click", async () => {
+      if (isFinished) return;
       collectAnswers();
+
+      let answeredCount = 0;
+      selectedQuestions.forEach((q) => {
+        const qKey = getQKey(q);
+        if (isAnswered(q.type, userAnswers[qKey])) answeredCount++;
+      });
+      const unanswered = count - answeredCount;
+      if (unanswered > 0) {
+        const ok = confirm(`У вас осталось ${unanswered} неотвеченных заданий. Точно хотите завершить тест и посмотреть результаты?`);
+        if (!ok) return;
+      }
+
+      isFinished = true;
       submitBtn.disabled = true;
+
+      // Блокируем вопросы
+      questionsWrap.querySelectorAll("article.q").forEach((art) => {
+        art.classList.add("locked");
+        art.querySelectorAll("input, button:not(.favorite-btn)").forEach((el) => {
+          el.disabled = true;
+        });
+      });
 
       let score = 0;
       selectedQuestions.forEach((q) => {
         const qKey = getQKey(q);
         const art = document.getElementById(`q-${qKey}`);
         const userVal = userAnswers[qKey];
-        const correct = gradeQuestion(q, userVal);
-
-        if (correct) {
-          score++;
-          if (art) {
-            art.classList.add("is-right");
-            art.classList.remove("is-wrong");
-          }
-        } else if (art) {
-          art.classList.add("is-wrong");
-          art.classList.remove("is-right");
-        }
-
-        const rev = art?.querySelector(".review");
-        if (rev) {
-          rev.hidden = false;
-          let hintsStr = "";
-          if (Array.isArray(q.hintsHtml) && q.hintsHtml.length > 0) {
-            hintsStr = `<div class="hints-box" style="margin-top: 0.5rem; font-size: 0.9rem; background: var(--surface-subtle); padding: 0.75rem; border-radius: 6px;">💡 <strong>Разбор задания:</strong> ${q.hintsHtml.join("<hr>")}</div>`;
-          }
-          rev.innerHTML = `
-            <p class="feedback-msg ${correct ? 'ok' : 'bad'}" style="margin: 0.5rem 0 0.25rem;">
-              ${correct ? '✅ Верно!' : '❌ Неверно.'}
-            </p>
-            ${hintsStr}
-          `;
-        }
+        const correct = renderQuestionReview(art, q, userVal, true);
+        if (correct) score++;
 
         const mapBtn = mapGrid?.querySelector(`[data-go="${qKey}"]`);
         if (mapBtn) {

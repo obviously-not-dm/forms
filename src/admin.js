@@ -223,8 +223,8 @@ function renderAdmin() {
   const userLabel = currentUser?.login || "Администратор";
   const badge = el("span", {
     class: "tag tag-accent",
-    style: "margin-left: 0.5rem; font-size: 0.82rem; font-weight: 600;",
-  }, `👤 ${userLabel}`);
+    style: "margin-left: 0.5rem; font-size: 0.82rem; font-weight: 600; font-family: var(--font-mono);",
+  }, userLabel);
 
   const nav = el("div", { class: "admin-segmented-nav", role: "tablist" },
     el("button", {
@@ -233,49 +233,49 @@ function renderAdmin() {
       role: "tab",
       "aria-selected": currentTab === "tests",
       onclick: () => switchTab("tests"),
-    }, "📝 Тесты"),
+    }, "Тесты"),
     el("button", {
       class: `admin-nav-item ${currentTab === "notes" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "notes",
       onclick: () => switchTab("notes"),
-    }, "📚 Конспекты и теория"),
+    }, "Конспекты"),
     el("button", {
       class: `admin-nav-item ${currentTab === "colloquiums" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "colloquiums",
       onclick: () => switchTab("colloquiums"),
-    }, "🎓 Коллоквиумы"),
+    }, "Коллоквиумы"),
     el("button", {
       class: `admin-nav-item ${currentTab === "practices" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "practices",
       onclick: () => switchTab("practices"),
-    }, "📝 Практики"),
+    }, "Практики"),
     el("button", {
       class: `admin-nav-item ${currentTab === "homeworks" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "homeworks",
       onclick: () => switchTab("homeworks"),
-    }, "📤 ДЗ и Проверка"),
+    }, "ДЗ и Проверка"),
     el("button", {
       class: `admin-nav-item ${currentTab === "contests" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "contests",
       onclick: () => switchTab("contests"),
-    }, "⏱️ Онлайн-контесты"),
+    }, "Онлайн-контесты"),
     el("button", {
       class: `admin-nav-item ${currentTab === "stats" ? "active" : ""}`,
       type: "button",
       role: "tab",
       "aria-selected": currentTab === "stats",
       onclick: () => switchTab("stats"),
-    }, "📊 Статистика"));
+    }, "Статистика"));
 
   const exitBtn = el("button", {
     class: "btn quiet btn-sm",
@@ -3362,12 +3362,73 @@ async function contestsTab(container) {
       el("option", { value: "" }, "— Выберите тест курса —"),
       ...testOptions);
 
-    const groupSelect = el("select", { style: "width: 100%;" },
-      el("option", { value: "all" }, "Все группы курса"),
-      ...Array.from({ length: 15 }, (_, i) => {
-        const g = `M31${String(11 + i).padStart(2, "0")}`;
-        return el("option", { value: g }, `Группа ${g}`);
-      }));
+    const courseGroupsList = [
+      "M3111", "M3112", "M3113", "M3114", "M3115",
+      "M3116", "M3117", "M3118", "M3119", "M3120",
+      "M3121", "M3122", "M3123", "M3124", "M3125",
+      "M3101", "M3102", "M3103"
+    ];
+    let selectedGroups = ["all"];
+
+    const groupStatusText = el("span", {
+      class: "muted",
+      style: "font-size: 0.85rem; margin-left: 0.5rem; font-weight: normal;",
+    }, "Выбрано: Все группы курса");
+
+    const chipsWrapper = el("div", {
+      style: "display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.5rem;",
+    });
+
+    function renderGroupChips() {
+      chipsWrapper.replaceChildren();
+
+      const isAll = selectedGroups.includes("all") || selectedGroups.length === 0;
+
+      // Кнопка 'Все группы курса (all)'
+      const allBtn = el("button", {
+        type: "button",
+        class: `btn btn-sm ${isAll ? "primary" : "quiet"}`,
+        style: isAll ? "font-weight: 600;" : "opacity: 0.85;",
+        onclick: () => {
+          selectedGroups = ["all"];
+          renderGroupChips();
+        },
+      }, isAll ? "✓ Все группы курса (all)" : "Все группы курса (all)");
+      chipsWrapper.append(allBtn);
+
+      // Кнопки для каждой группы курса
+      for (const g of courseGroupsList) {
+        const isSelected = !isAll && selectedGroups.includes(g);
+        const gBtn = el("button", {
+          type: "button",
+          class: `btn btn-sm ${isSelected ? "primary" : "quiet"}`,
+          style: isSelected ? "font-weight: 600;" : "",
+          onclick: () => {
+            if (selectedGroups.includes("all")) {
+              selectedGroups = [g];
+            } else if (selectedGroups.includes(g)) {
+              selectedGroups = selectedGroups.filter((x) => x !== g);
+              if (selectedGroups.length === 0) selectedGroups = ["all"];
+            } else {
+              selectedGroups.push(g);
+              if (selectedGroups.length === courseGroupsList.length) {
+                selectedGroups = ["all"];
+              }
+            }
+            renderGroupChips();
+          },
+        }, isSelected ? `✓ ${g}` : g);
+        chipsWrapper.append(gBtn);
+      }
+
+      if (isAll) {
+        groupStatusText.textContent = "Выбрано: Все группы курса";
+      } else {
+        groupStatusText.textContent = `Выбрано: ${selectedGroups.join(", ")} (${selectedGroups.length})`;
+      }
+    }
+
+    renderGroupChips();
 
     const durationInput = el("input", {
       type: "number",
@@ -3387,7 +3448,7 @@ async function contestsTab(container) {
         formError.hidden = true;
         const title = titleInput.value.trim();
         const testId = testSelect.value;
-        const group = groupSelect.value;
+        const groupName = selectedGroups.includes("all") ? "all" : selectedGroups.join(", ");
         const dur = Number(durationInput.value) || 15;
 
         if (!title || !testId) {
@@ -3399,7 +3460,13 @@ async function contestsTab(container) {
         try {
           await json("/api/admin/contests", {
             method: "POST",
-            body: { title, test_id: testId, group_name: group, duration_minutes: dur },
+            body: {
+              title,
+              test_id: testId,
+              group_name: groupName,
+              groups: selectedGroups,
+              duration_minutes: dur,
+            },
           });
           render();
         } catch (err) {
@@ -3409,11 +3476,25 @@ async function contestsTab(container) {
       },
     },
       el("h3", { style: "margin-top: 0; margin-bottom: 1rem; font-size: 1.15rem;" }, "🚀 Запустить онлайн-контест на паре"),
-      el("div", { class: "admin-form-grid", style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;" },
+      el("div", { class: "admin-form-grid", style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;" },
         el("label", {}, el("span", { class: "field-label" }, "Название работы"), titleInput),
         el("label", {}, el("span", { class: "field-label" }, "Тест курса"), testSelect),
-        el("label", {}, el("span", { class: "field-label" }, "Целевая группа"), groupSelect),
         el("label", {}, el("span", { class: "field-label" }, "Таймер (минут)"), durationInput)),
+      el("div", { style: "margin-bottom: 1.5rem; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 0.85rem 1rem;" },
+        el("div", { style: "display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;" },
+          el("span", { class: "field-label", style: "margin-bottom: 0; font-weight: 600;" },
+            "Целевые группы (выберите одну, несколько или все):",
+            groupStatusText),
+          el("button", {
+            type: "button",
+            class: "btn quiet btn-sm",
+            style: "font-size: 0.78rem; padding: 0.2rem 0.6rem;",
+            onclick: () => {
+              selectedGroups = ["all"];
+              renderGroupChips();
+            },
+          }, "Сбросить на «Все группы»")),
+        chipsWrapper),
       formError,
       el("button", { class: "btn primary", type: "submit" }, "⚡ Запустить контест для студентов"));
 

@@ -236,8 +236,28 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_hw_subs_status ON homework_submissions(status);
   `);
 
+  // Нормализация групп: замена кириллической 'М' на латинскую 'M'
+  try {
+    db.exec(`
+      UPDATE users SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+      UPDATE attempts SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+      UPDATE contests SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+      UPDATE contest_submissions SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+      UPDATE practices SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+      UPDATE homeworks SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+      UPDATE homework_submissions SET group_name = REPLACE(REPLACE(group_name, 'М', 'M'), 'м', 'M') WHERE group_name LIKE '%М%' OR group_name LIKE '%м%';
+    `);
+  } catch {}
+
   seedColloquiumsIfEmpty(db);
   seedPlatformDemoData(db);
+}
+
+export function normalizeGroupName(group) {
+  if (!group) return "";
+  return String(group)
+    .trim()
+    .replace(/(^|\s)[\u041c\u043c]([0-9]{3,})/g, "$1M$2");
 }
 
 // ==========================================
@@ -515,7 +535,7 @@ export function saveAttempt({
   const attemptId = id || `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const quizId = quiz_id || testId || test_id || "";
   const finalUserId = user_id || userId || null;
-  const group = group_name || userName || user_name || null;
+  const group = normalizeGroupName(group_name || userName || user_name || null);
   const finalScore = Number(score || 0);
   const finalMaxScore = Number(max_score || maxScore || 0);
   const now = created_at || new Date().toISOString();
@@ -562,6 +582,38 @@ export function saveAttempt({
     duration_sec: Number(duration_sec || 0),
     created_at: now,
   };
+}
+
+export function saveAttemptFeedback({ id = null, quiz_id = null, user_id = null, feedback = "" }) {
+  const db = getDb();
+  const text = String(feedback || "").trim();
+  if (!text) return null;
+
+  if (id) {
+    db.prepare(`UPDATE attempts SET feedback = ? WHERE id = ?`).run(text, id);
+    return db.prepare(`SELECT * FROM attempts WHERE id = ?`).get(id);
+  }
+
+  let row = null;
+  if (user_id && quiz_id) {
+    row = db.prepare(`SELECT id FROM attempts WHERE user_id = ? AND quiz_id = ? ORDER BY created_at DESC LIMIT 1`).get(user_id, quiz_id);
+  } else if (quiz_id) {
+    row = db.prepare(`SELECT id FROM attempts WHERE quiz_id = ? ORDER BY created_at DESC LIMIT 1`).get(quiz_id);
+  }
+
+  if (row) {
+    db.prepare(`UPDATE attempts SET feedback = ? WHERE id = ?`).run(text, row.id);
+    return db.prepare(`SELECT * FROM attempts WHERE id = ?`).get(row.id);
+  }
+
+  return saveAttempt({
+    quiz_id: quiz_id || "general",
+    user_id,
+    feedback: text,
+    mode: "feedback",
+    score: 0,
+    max_score: 0,
+  });
 }
 
 export function getAttempts({ quizId = null, testId = null, userId = null, since = null, mode = null } = {}) {
@@ -1136,10 +1188,13 @@ export function createUser({ email, password, name, group_name, role = "student"
   const db = getDb();
   const cleanEmail = String(email || "").trim().toLowerCase();
   const cleanName = String(name || "").trim();
-  const cleanGroup = String(group_name || "").trim().toUpperCase();
+  const cleanGroup = normalizeGroupName(group_name);
 
   if (!cleanEmail || !password || !cleanName) {
     throw new Error("Заполните все обязательные поля (email, пароль, имя)");
+  }
+  if (password.length < 6) {
+    throw new Error("Пароль должен содержать не менее 6 символов");
   }
 
   const existing = getUserByEmail(cleanEmail);
@@ -1190,8 +1245,8 @@ export function updateUserPassword(email, newPassword) {
   if (!user) {
     throw new Error("Пользователь с таким email не найден");
   }
-  if (!newPassword || newPassword.length < 4) {
-    throw new Error("Новый пароль должен содержать не менее 4 символов");
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("Новый пароль должен содержать не менее 6 символов");
   }
 
   const passwordHash = hashPassword(newPassword);
@@ -1424,6 +1479,7 @@ export function createContest({
   title,
   test_id,
   group_name = "all",
+  groups = null,
   duration_minutes = 15,
   starts_at = null,
   ends_at = null,
@@ -1435,6 +1491,11 @@ export function createContest({
   const dur = Number(duration_minutes || 15);
   const end = ends_at || new Date(new Date(now).getTime() + dur * 60 * 1000).toISOString();
 
+  let finalGroupName = group_name;
+  if (Array.isArray(groups)) {
+    finalGroupName = groups.includes("all") ? "all" : groups.join(", ");
+  }
+
   db.prepare(`
     INSERT INTO contests (id, title, test_id, group_name, duration_minutes, starts_at, ends_at, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1442,7 +1503,7 @@ export function createContest({
     contestId,
     String(title || "Летучка").trim(),
     String(test_id || "").trim(),
-    String(group_name || "all").trim(),
+    String(finalGroupName || "all").trim(),
     dur,
     now,
     end,
@@ -1458,8 +1519,8 @@ export function getAllContests({ group_name = null } = {}) {
   let query = "SELECT * FROM contests ORDER BY created_at DESC";
   const params = [];
   if (group_name && group_name !== "all") {
-    query = "SELECT * FROM contests WHERE group_name = 'all' OR group_name = ? ORDER BY created_at DESC";
-    params.push(group_name);
+    query = "SELECT * FROM contests WHERE group_name = 'all' OR group_name = ? OR (',' || REPLACE(group_name, ' ', '') || ',') LIKE ? ORDER BY created_at DESC";
+    params.push(group_name, `%,${group_name},%`);
   }
 
   const rows = db.prepare(query).all(...params);
@@ -1475,6 +1536,7 @@ export function getAllContests({ group_name = null } = {}) {
 
     return {
       ...r,
+      groups: parseGroupsList(r.group_name),
       status: currentStatus,
       submissions_count: subsCount,
     };
@@ -1493,6 +1555,7 @@ export function getContestById(id) {
 
   return {
     ...r,
+    groups: parseGroupsList(r.group_name),
     status: currentStatus,
   };
 }
@@ -1537,7 +1600,7 @@ export function saveContestSubmission({
     contest_id,
     user_id,
     user_name || "Студент",
-    group_name || "",
+    normalizeGroupName(group_name) || "",
     finalScore,
     finalMaxScore,
     pct,
@@ -1605,7 +1668,13 @@ export function getUserContestSubmission(contest_id, user_id) {
 // PRACTICES REPOSITORY
 // ==========================================
 
-export function getAllPractices({ group = null, includeUnpublished = false } = {}) {
+function parseGroupsList(groupStr) {
+  if (!groupStr || groupStr === "all") return ["all"];
+  const list = String(groupStr).split(",").map((s) => s.trim()).filter(Boolean);
+  return list.length > 0 ? list : ["all"];
+}
+
+export function getAllPractices({ group = null, includeUnpublished = false, onlyAll = false } = {}) {
   const db = getDb();
   let query = "SELECT * FROM practices";
   const conditions = [];
@@ -1615,9 +1684,11 @@ export function getAllPractices({ group = null, includeUnpublished = false } = {
     conditions.push("is_published = 1");
   }
 
-  if (group && group !== "all") {
-    conditions.push("(group_name = 'all' OR group_name = ?)");
-    params.push(group);
+  if (onlyAll || group === "__all_only__") {
+    conditions.push("group_name = 'all'");
+  } else if (group && group !== "all") {
+    conditions.push("(group_name = 'all' OR group_name = ? OR (',' || REPLACE(group_name, ' ', '') || ',') LIKE ?)");
+    params.push(group, `%,${group},%`);
   }
 
   if (conditions.length > 0) {
@@ -1634,6 +1705,7 @@ export function getAllPractices({ group = null, includeUnpublished = false } = {
     topic: r.topic || "Общее",
     title: r.title || r.id,
     group_name: r.group_name || "all",
+    groups: parseGroupsList(r.group_name),
     is_published: Boolean(r.is_published),
     content: r.content || "",
     created_at: r.created_at,
@@ -1652,6 +1724,7 @@ export function getPracticeById(id) {
     topic: r.topic || "Общее",
     title: r.title || r.id,
     group_name: r.group_name || "all",
+    groups: parseGroupsList(r.group_name),
     is_published: Boolean(r.is_published),
     content: r.content || "",
     created_at: r.created_at,
@@ -1665,6 +1738,7 @@ export function savePractice({
   topic = "Общее",
   order_index = 0,
   group_name = "all",
+  groups = null,
   is_published = 1,
   content = "",
 }) {
@@ -1672,6 +1746,17 @@ export function savePractice({
   const safeId = id ? String(id).trim() : `practice-${Date.now()}`;
   const now = new Date().toISOString();
   const existing = getPracticeById(safeId);
+
+  let finalGroupName = "all";
+  if (Array.isArray(groups)) {
+    if (groups.includes("all") || groups.length === 0) {
+      finalGroupName = "all";
+    } else {
+      finalGroupName = groups.map((g) => String(g).trim()).filter(Boolean).join(", ");
+    }
+  } else if (group_name) {
+    finalGroupName = String(group_name).trim();
+  }
 
   const createdAt = existing?.created_at || now;
   const pubVal = is_published ? 1 : 0;
@@ -1684,7 +1769,7 @@ export function savePractice({
     Number(order_index || 0),
     topic || "Общее",
     title || safeId,
-    group_name || "all",
+    finalGroupName,
     pubVal,
     content || "",
     createdAt,
@@ -1704,7 +1789,7 @@ export function deletePractice(id) {
 // HOMEWORKS REPOSITORY
 // ==========================================
 
-export function getAllHomeworks({ group = null, includeUnpublished = false, userId = null } = {}) {
+export function getAllHomeworks({ group = null, includeUnpublished = false, userId = null, onlyAll = false } = {}) {
   const db = getDb();
   let query = "SELECT * FROM homeworks";
   const conditions = [];
@@ -1714,9 +1799,11 @@ export function getAllHomeworks({ group = null, includeUnpublished = false, user
     conditions.push("is_published = 1");
   }
 
-  if (group && group !== "all") {
-    conditions.push("(group_name = 'all' OR group_name = ?)");
-    params.push(group);
+  if (onlyAll || group === "__all_only__") {
+    conditions.push("group_name = 'all'");
+  } else if (group && group !== "all") {
+    conditions.push("(group_name = 'all' OR group_name = ? OR (',' || REPLACE(group_name, ' ', '') || ',') LIKE ?)");
+    params.push(group, `%,${group},%`);
   }
 
   if (conditions.length > 0) {
@@ -1740,6 +1827,7 @@ export function getAllHomeworks({ group = null, includeUnpublished = false, user
       topic: r.topic || "Общее",
       title: r.title || r.id,
       group_name: r.group_name || "all",
+      groups: parseGroupsList(r.group_name),
       deadline: r.deadline || "",
       max_score: Number(r.max_score || 10),
       is_published: Boolean(r.is_published),
@@ -1770,6 +1858,7 @@ export function getHomeworkById(id, userId = null) {
     topic: r.topic || "Общее",
     title: r.title || r.id,
     group_name: r.group_name || "all",
+    groups: parseGroupsList(r.group_name),
     deadline: r.deadline || "",
     max_score: Number(r.max_score || 10),
     is_published: Boolean(r.is_published),
@@ -1787,6 +1876,7 @@ export function saveHomework({
   topic = "Общее",
   order_index = 0,
   group_name = "all",
+  groups = null,
   deadline = "",
   max_score = 10,
   is_published = 1,
@@ -1796,6 +1886,17 @@ export function saveHomework({
   const safeId = id ? String(id).trim() : `hw-${Date.now()}`;
   const now = new Date().toISOString();
   const existing = getHomeworkById(safeId);
+
+  let finalGroupName = "all";
+  if (Array.isArray(groups)) {
+    if (groups.includes("all") || groups.length === 0) {
+      finalGroupName = "all";
+    } else {
+      finalGroupName = groups.map((g) => String(g).trim()).filter(Boolean).join(", ");
+    }
+  } else if (group_name) {
+    finalGroupName = String(group_name).trim();
+  }
 
   const createdAt = existing?.created_at || now;
   const pubVal = is_published ? 1 : 0;
@@ -1808,7 +1909,7 @@ export function saveHomework({
     Number(order_index || 0),
     topic || "Общее",
     title || safeId,
-    group_name || "all",
+    finalGroupName,
     deadline || "",
     Number(max_score || 10),
     pubVal,
@@ -1857,7 +1958,7 @@ export function saveHomeworkSubmission({
     homework_id,
     user_id,
     user_name || "Студент",
-    group_name || "",
+    normalizeGroupName(group_name) || "",
     file_name || "solution.pdf",
     file_path,
     Number(file_size || 0),

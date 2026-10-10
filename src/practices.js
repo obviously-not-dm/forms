@@ -13,11 +13,31 @@ class PracticesApp {
   }
 
   async init() {
-    // 1. Check user group from storage or session
+    this.currentUser = null;
+    this.isGuest = true;
+
+    // Check user group from storage or session
     const savedGroup = localStorage.getItem("dm_user_group");
     if (savedGroup) {
       this.selectedGroup = savedGroup;
     }
+
+    const token = localStorage.getItem("dm_session") || localStorage.getItem("dm_admin_token");
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    try {
+      const sessRes = await fetch("/api/auth/session", { headers, credentials: "same-origin" });
+      if (sessRes.ok) {
+        const sessData = await sessRes.json();
+        if (sessData.authenticated && sessData.user) {
+          this.currentUser = sessData.user;
+          this.isGuest = false;
+          if (this.currentUser.group_name && !this.selectedGroup) {
+            this.selectedGroup = this.currentUser.group_name;
+          }
+        }
+      }
+    } catch {}
 
     // Check query param or hash for selected practice
     const urlParams = new URLSearchParams(window.location.search);
@@ -26,11 +46,9 @@ class PracticesApp {
       this.selectedId = paramId;
     }
 
-    // 2. Fetch fresh data from API if available
+    // Fetch fresh data from API if available
     try {
-      const token = localStorage.getItem("dm_session") || localStorage.getItem("dm_admin_token");
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch("/api/practices", { headers });
+      const res = await fetch("/api/practices", { headers, credentials: "same-origin" });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.practices) && data.practices.length > 0) {
@@ -75,12 +93,29 @@ class PracticesApp {
 
   getFilteredPractices() {
     return this.practices.filter((p) => {
-      // Group filter
-      if (this.selectedGroup && this.selectedGroup !== "all") {
-        if (p.group_name && p.group_name !== "all" && p.group_name !== this.selectedGroup) {
+      const pGroups = Array.isArray(p.groups) && p.groups.length > 0
+        ? p.groups
+        : (p.group_name ? p.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+      const isPublic = pGroups.includes("all");
+
+      // 1. Unregistered guest: ONLY public practices visible
+      if (this.isGuest) {
+        if (!isPublic) return false;
+      } else if (this.currentUser && this.currentUser.role !== "admin" && this.currentUser.role !== "teacher") {
+        // 2. Student: only public OR student's own group
+        const myGroup = this.currentUser.group_name;
+        if (!isPublic && (!myGroup || !pGroups.includes(myGroup))) {
           return false;
         }
+      } else {
+        // 3. Teacher: can filter by selectedGroup
+        if (this.selectedGroup && this.selectedGroup !== "all") {
+          if (!pGroups.includes("all") && !pGroups.includes(this.selectedGroup)) {
+            return false;
+          }
+        }
       }
+
       // Search filter
       if (this.searchQuery) {
         const matchTitle = (p.title || "").toLowerCase().includes(this.searchQuery);
@@ -105,15 +140,40 @@ class PracticesApp {
     }
   }
 
+  formatGroupBadge(p) {
+    const pGroups = Array.isArray(p.groups) && p.groups.length > 0
+      ? p.groups
+      : (p.group_name ? p.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+    if (pGroups.includes("all")) {
+      return `<span class="badge badge-group-info">Все группы</span>`;
+    }
+    if (pGroups.length > 2) {
+      return `<span class="badge badge-group-info" title="Группы: ${this.esc(pGroups.join(', '))}">${this.esc(pGroups.slice(0, 2).join(', '))} +${pGroups.length - 2}</span>`;
+    }
+    return `<span class="badge badge-group-info" title="Группы: ${this.esc(pGroups.join(', '))}">${this.esc(pGroups.join(', '))}</span>`;
+  }
+
   renderList() {
     const listEl = document.getElementById("practices-list");
     if (!listEl) return;
 
     const filtered = this.getFilteredPractices();
+
+    let guestNotice = "";
+    if (this.isGuest) {
+      guestNotice = `
+        <div class="auth-callout-banner" style="background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 0.75rem 0.85rem; margin-bottom: 0.85rem; font-size: 0.82rem; line-height: 1.4;">
+          <strong>Вы не вошли в аккаунт</strong><br>
+          Показаны только общие практики. <a href="#" onclick="document.getElementById('btn-auth-open')?.click(); return false;" style="font-weight: 600; text-decoration: underline; color: var(--accent-ink);">Войдите</a>, чтобы открыть практики вашей группы.
+        </div>
+      `;
+    }
+
     if (filtered.length === 0) {
       listEl.innerHTML = `
+        ${guestNotice}
         <div style="padding: 1.5rem; text-align: center; color: var(--muted); font-size: 0.9rem;">
-          Практик не найдено
+          Практик для выбранной группы не найдено
         </div>`;
       return;
     }
@@ -128,7 +188,7 @@ class PracticesApp {
       topicsMap.get(topic).push(p);
     }
 
-    let html = "";
+    let html = guestNotice;
     for (const [topic, items] of topicsMap.entries()) {
       html += `
         <div class="practices-topic-group">
@@ -137,13 +197,10 @@ class PracticesApp {
             ${items
               .map((p) => {
                 const isActive = p.id === this.selectedId;
-                const groupBadge = p.group_name && p.group_name !== "all"
-                  ? `<span class="badge badge-group" style="font-size: 0.72rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: var(--accent-soft); color: var(--accent-ink);">${this.esc(p.group_name)}</span>`
-                  : "";
+                const groupBadge = this.formatGroupBadge(p);
                 return `
                   <button type="button" class="practice-nav-card ${isActive ? "active" : ""}" data-id="${this.esc(p.id)}">
                     <div class="practice-card-title-row">
-                      <span class="practice-card-icon">📝</span>
                       <span class="practice-card-title">${this.esc(p.title)}</span>
                     </div>
                     <div class="practice-card-meta-row">
@@ -195,17 +252,20 @@ class PracticesApp {
       return;
     }
 
-    const groupLabel = practice.group_name && practice.group_name !== "all"
-      ? `Группа: ${this.esc(practice.group_name)}`
-      : "Для всех групп";
+    const pGroups = Array.isArray(practice.groups) && practice.groups.length > 0
+      ? practice.groups
+      : (practice.group_name ? practice.group_name.split(",").map((s) => s.trim()).filter(Boolean) : ["all"]);
+    const groupLabel = pGroups.includes("all")
+      ? "Для всех групп"
+      : `Группы: ${pGroups.join(", ")}`;
 
     const contentHtml = practice.html || (practice.content ? this.renderFallbackMd(practice.content) : "<p>Текст практики отсутствует.</p>");
 
     articleEl.innerHTML = `
       <header class="practice-header">
         <div class="practice-meta-row">
-          <span class="badge badge-topic">📌 ${this.esc(practice.topic || "Общее")}</span>
-          <span class="badge badge-group-info">👥 ${this.esc(groupLabel)}</span>
+          <span class="badge badge-topic">§ ${this.esc(practice.topic || "Общее")}</span>
+          <span class="badge badge-group-info">${this.esc(groupLabel)}</span>
         </div>
         <h1 class="practice-main-title">${this.esc(practice.title)}</h1>
       </header>
@@ -216,16 +276,25 @@ class PracticesApp {
     `;
 
     // Render KaTeX math in article if auto-render is available or if fallback raw formulas remain
-    if (window.renderMathInElement) {
-      try {
-        window.renderMathInElement(articleEl, {
-          delimiters: [
-            { left: "$$", right: "$$", display: true },
-            { left: "$", right: "$", display: false },
-          ],
-          throwOnError: false,
-        });
-      } catch {}
+    const applyMath = () => {
+      if (window.renderMathInElement) {
+        try {
+          window.renderMathInElement(articleEl, {
+            delimiters: [
+              { left: "$$", right: "$$", display: true },
+              { left: "\\[", right: "\\]", display: true },
+              { left: "$", right: "$", display: false },
+              { left: "\\(", right: "\\)", display: false },
+            ],
+            ignoredTags: ["script", "noscript", "style", "textarea", "pre"],
+            throwOnError: false,
+          });
+        } catch {}
+      }
+    };
+    applyMath();
+    if (!window.renderMathInElement) {
+      setTimeout(applyMath, 150);
     }
   }
 
@@ -237,7 +306,7 @@ class PracticesApp {
     // Preserve block formulas $$...$$
     text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
       const key = `%%MATH_BLOCK_${mathCounter++}%%`;
-      let rendered = `<div class="katex-display">$$${tex}$$</div>`;
+      let rendered = `$$${tex}$$`;
       if (window.katex) {
         try {
           rendered = `<div class="katex-display">${window.katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false })}</div>`;
@@ -248,9 +317,9 @@ class PracticesApp {
     });
 
     // Preserve inline formulas $...$
-    text = text.replace(/(?<!\\)\$([^\n$]+?)(?<!\\)\$/g, (_, tex) => {
+    text = text.replace(/\$([^\$\n]+?)\$/g, (_, tex) => {
       const key = `%%MATH_INLINE_${mathCounter++}%%`;
-      let rendered = `<code>$${tex}$</code>`;
+      let rendered = `$${tex}$`;
       if (window.katex) {
         try {
           rendered = window.katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });

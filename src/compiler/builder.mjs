@@ -491,7 +491,11 @@ export function build() {
   const fontDir = path.join(ROOT, "node_modules", "@fontsource");
   const fonts = [
     [path.join(fontDir, "onest", "files", "onest-cyrillic-400-normal.woff2"), "onest-cyrillic-400-normal.woff2"],
+    [path.join(fontDir, "onest", "files", "onest-latin-400-normal.woff2"), "onest-latin-400-normal.woff2"],
+    [path.join(fontDir, "onest", "files", "onest-cyrillic-500-normal.woff2"), "onest-cyrillic-500-normal.woff2"],
+    [path.join(fontDir, "onest", "files", "onest-latin-500-normal.woff2"), "onest-latin-500-normal.woff2"],
     [path.join(fontDir, "onest", "files", "onest-cyrillic-600-normal.woff2"), "onest-cyrillic-600-normal.woff2"],
+    [path.join(fontDir, "onest", "files", "onest-latin-600-normal.woff2"), "onest-latin-600-normal.woff2"],
     [path.join(fontDir, "unbounded", "files", "unbounded-cyrillic-600-normal.woff2"), "unbounded-cyrillic-600-normal.woff2"],
   ];
   for (const [src, dst] of fonts) {
@@ -651,6 +655,9 @@ export function build() {
         options,
         optionsHtml: q.optionsHtml || [],
         hintsHtml: q.hintsHtml || [],
+        explanationHtml: q.explanationHtml || "",
+        optionNotesHtml: q.optionNotesHtml || [],
+        answerNotesHtml: q.answerNotesHtml || [],
         key: q.key || null,
       };
     }))
