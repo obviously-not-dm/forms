@@ -8,8 +8,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const sidebar = document.querySelector(".notes-sidebar");
 
   if (menuBtn && sidebar) {
-    menuBtn.addEventListener("click", () => {
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
       sidebar.classList.toggle("open");
+    });
+    document.addEventListener("click", (e) => {
+      if (sidebar.classList.contains("open") && !sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
+        sidebar.classList.remove("open");
+      }
     });
   }
 

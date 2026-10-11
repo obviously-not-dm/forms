@@ -22,6 +22,10 @@ import {
   customTestPage,
   practicesPage,
   homeworksPage,
+  typoviksPage,
+  schedulePage,
+  gradesPage,
+  requestsPage,
 } from "./templates.mjs";
 import { syncFromDisk, getAllNotes, getAllTests, getAllColloquiumQuestions, getAllPractices, getAllHomeworks } from "../server/db.mjs";
 
@@ -695,6 +699,23 @@ export function build() {
   fs.mkdirSync(homeworksOut, { recursive: true });
   fs.writeFileSync(path.join(homeworksOut, "index.html"), homeworksPage(renderedHomeworks, site));
   fs.writeFileSync(path.join(DIST, "homeworks.json"), JSON.stringify(renderedHomeworks));
+
+  // Build typoviks, schedule, grades, requests pages
+  const typOut = path.join(DIST, "typoviks");
+  fs.mkdirSync(typOut, { recursive: true });
+  fs.writeFileSync(path.join(typOut, "index.html"), typoviksPage(site));
+
+  const schedOut = path.join(DIST, "schedule");
+  fs.mkdirSync(schedOut, { recursive: true });
+  fs.writeFileSync(path.join(schedOut, "index.html"), schedulePage(site));
+
+  const grdOut = path.join(DIST, "grades");
+  fs.mkdirSync(grdOut, { recursive: true });
+  fs.writeFileSync(path.join(grdOut, "index.html"), gradesPage(site));
+
+  const reqOut = path.join(DIST, "requests");
+  fs.mkdirSync(reqOut, { recursive: true });
+  fs.writeFileSync(path.join(reqOut, "index.html"), requestsPage(site));
 
   // Build admin & home
   const visibleColloquiumsCount = renderedColloquiums.filter((c) => !c.hidden).length;

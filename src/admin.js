@@ -45,7 +45,20 @@ function el(tag, attrs = {}, ...children) {
   return n;
 }
 
+const adminGetCache = new Map();
+const ADMIN_CACHE_TTL_MS = 15000;
+
 async function json(path, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  if (method !== "GET") {
+    adminGetCache.clear();
+  } else if (!options.skipCache && path !== "/api/auth/session") {
+    const cached = adminGetCache.get(path);
+    if (cached && Date.now() - cached.ts < ADMIN_CACHE_TTL_MS) {
+      return structuredClone ? structuredClone(cached.data) : JSON.parse(JSON.stringify(cached.data));
+    }
+  }
+
   const opts = { cache: "no-cache", credentials: "same-origin", ...options };
   opts.headers = { ...(opts.headers || {}) };
   const token = localStorage.getItem("dm_admin_token");
@@ -65,7 +78,11 @@ async function json(path, options = {}) {
     } catch {}
     throw new Error(msg);
   }
-  return r.json();
+  const data = await r.json();
+  if (method === "GET" && path !== "/api/auth/session") {
+    adminGetCache.set(path, { ts: Date.now(), data });
+  }
+  return data;
 }
 
 function openPreviewModal(url, title = "Предпросмотр") {
@@ -219,90 +236,122 @@ function login() {
 
 // ---------- навигация админ-панели ----------
 
+const ADMIN_TABS = [
+  { key: "tests", label: "Тесты" },
+  { key: "notes", label: "Конспекты" },
+  { key: "colloquiums", label: "Коллоквиумы" },
+  { key: "practices", label: "Практики" },
+  { key: "homeworks", label: "ДЗ и Проверка" },
+  { key: "typoviks", label: "Типовые расчеты" },
+  { key: "schedule", label: "Расписание" },
+  { key: "grades", label: "Журнал" },
+  { key: "requests", label: "Заявки" },
+  { key: "feedback", label: "Отзывы" },
+  { key: "contests", label: "Онлайн-контесты" },
+  { key: "stats", label: "Статистика" },
+];
+
 function renderAdmin() {
-  const userLabel = currentUser?.login || "Администратор";
-  const badge = el("span", {
-    class: "tag tag-accent",
-    style: "margin-left: 0.5rem; font-size: 0.82rem; font-weight: 600; font-family: var(--font-mono);",
-  }, userLabel);
+  let header = document.getElementById("admin-header-bar");
+  let container = document.getElementById("admin-content");
 
-  const nav = el("div", { class: "admin-segmented-nav", role: "tablist" },
-    el("button", {
-      class: `admin-nav-item ${currentTab === "tests" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "tests",
-      onclick: () => switchTab("tests"),
-    }, "Тесты"),
-    el("button", {
-      class: `admin-nav-item ${currentTab === "notes" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "notes",
-      onclick: () => switchTab("notes"),
-    }, "Конспекты"),
-    el("button", {
-      class: `admin-nav-item ${currentTab === "colloquiums" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "colloquiums",
-      onclick: () => switchTab("colloquiums"),
-    }, "Коллоквиумы"),
-    el("button", {
-      class: `admin-nav-item ${currentTab === "practices" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "practices",
-      onclick: () => switchTab("practices"),
-    }, "Практики"),
-    el("button", {
-      class: `admin-nav-item ${currentTab === "homeworks" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "homeworks",
-      onclick: () => switchTab("homeworks"),
-    }, "ДЗ и Проверка"),
-    el("button", {
-      class: `admin-nav-item ${currentTab === "contests" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "contests",
-      onclick: () => switchTab("contests"),
-    }, "Онлайн-контесты"),
-    el("button", {
-      class: `admin-nav-item ${currentTab === "stats" ? "active" : ""}`,
-      type: "button",
-      role: "tab",
-      "aria-selected": currentTab === "stats",
-      onclick: () => switchTab("stats"),
-    }, "Статистика"));
+  if (!header || !container) {
+    const userLabel = currentUser?.login || "Администратор";
+    const badge = el("span", {
+      class: "tag tag-accent",
+      style: "margin-left: 0.5rem; font-size: 0.82rem; font-weight: 600; font-family: var(--font-mono);",
+    }, userLabel);
 
-  const exitBtn = el("button", {
-    class: "btn quiet btn-sm",
-    type: "button",
-    onclick: async () => {
-      try {
-        await json("/api/auth/logout", { method: "POST" });
-      } catch {}
-      if (client) {
-        try { await client.auth.signOut(); } catch {}
+    const nav = el("div", { class: "admin-segmented-nav", id: "admin-segmented-nav", role: "tablist" },
+      ...ADMIN_TABS.map((t) =>
+        el("button", {
+          class: `admin-nav-item ${currentTab === t.key ? "active" : ""}`,
+          type: "button",
+          role: "tab",
+          "data-admin-tab": t.key,
+          "aria-selected": currentTab === t.key ? "true" : "false",
+          onclick: () => switchTab(t.key),
+        }, t.label)
+      )
+    );
+
+    const allTabsDrawer = el("div", { class: "admin-all-tabs-drawer", id: "admin-all-tabs-drawer" },
+      el("div", { class: "admin-all-tabs-grid" },
+        ...ADMIN_TABS.map((t) =>
+          el("button", {
+            class: `admin-drawer-tab-btn ${currentTab === t.key ? "active" : ""}`,
+            type: "button",
+            "data-admin-drawer-tab": t.key,
+            onclick: () => {
+              allTabsDrawer.classList.remove("open");
+              switchTab(t.key);
+            },
+          },
+            el("span", {}, t.label),
+            el("span", { style: "opacity: 0.5; font-size: 0.75rem;" }, "→"))
+        )
+      )
+    );
+
+    const menuToggleBtn = el("button", {
+      class: "btn quiet btn-sm",
+      type: "button",
+      id: "admin-menu-toggle-btn",
+      onclick: () => {
+        allTabsDrawer.classList.toggle("open");
+      },
+    }, "☰ Все разделы");
+
+    const exitBtn = el("button", {
+      class: "btn quiet btn-sm",
+      type: "button",
+      onclick: async () => {
+        try {
+          await json("/api/auth/logout", { method: "POST" });
+        } catch {}
+        if (client) {
+          try { await client.auth.signOut(); } catch {}
+        }
+        localStorage.removeItem("dm_admin_token");
+        adminGetCache.clear();
+        currentUser = null;
+        login();
+      },
+    }, "🚪 Выйти");
+
+    const topRow = el("div", { class: "admin-top-row" },
+      el("div", { style: "display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;" },
+        el("a", { class: "btn quiet btn-sm", href: "/", style: "font-size: 0.82rem;" }, "← На платформу"),
+        el("h1", { style: "margin: 0; font-size: 1.35rem; font-weight: 700;" }, "Панель управления"),
+        badge),
+      el("div", { style: "display: flex; align-items: center; gap: 0.5rem;" },
+        menuToggleBtn,
+        exitBtn));
+
+    const navRow = el("div", { class: "admin-nav-row" }, nav);
+
+    header = el("div", { class: "admin-header-bar", id: "admin-header-bar" }, topRow, navRow, allTabsDrawer);
+    container = el("div", { id: "admin-content" });
+
+    root.replaceChildren(header, container);
+  } else {
+    // Update active state in place without destroying header DOM or resetting scrollLeft
+    header.querySelectorAll("[data-admin-tab]").forEach((btn) => {
+      const isAct = btn.getAttribute("data-admin-tab") === currentTab;
+      btn.classList.toggle("active", isAct);
+      btn.setAttribute("aria-selected", isAct ? "true" : "false");
+      if (isAct && typeof btn.scrollIntoView === "function") {
+        try {
+          btn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        } catch {}
       }
-      localStorage.removeItem("dm_admin_token");
-      currentUser = null;
-      login();
-    },
-  }, "🚪 Выйти");
-
-  const header = el("div", { class: "admin-header-bar" },
-    el("div", { style: "display: flex; align-items: center; gap: 0.6rem;" },
-      el("h1", { style: "margin: 0; font-size: 1.45rem;" }, "Панель управления"),
-      badge),
-    nav,
-    exitBtn);
-
-  const container = el("div", { id: "admin-content" });
-
-  root.replaceChildren(header, container);
+    });
+    header.querySelectorAll("[data-admin-drawer-tab]").forEach((btn) => {
+      const isAct = btn.getAttribute("data-admin-drawer-tab") === currentTab;
+      btn.classList.toggle("active", isAct);
+    });
+    container.replaceChildren();
+  }
 
   if (currentTab === "stats") {
     statsTab(container);
@@ -314,6 +363,16 @@ function renderAdmin() {
     practicesTab(container);
   } else if (currentTab === "homeworks") {
     homeworksTab(container);
+  } else if (currentTab === "typoviks") {
+    typoviksTab(container);
+  } else if (currentTab === "schedule") {
+    scheduleTab(container);
+  } else if (currentTab === "grades") {
+    gradesTab(container);
+  } else if (currentTab === "requests") {
+    requestsTab(container);
+  } else if (currentTab === "feedback") {
+    feedbackTab(container);
   } else if (currentTab === "contests") {
     contestsTab(container);
   } else {
@@ -3720,13 +3779,13 @@ async function practicesTab(container) {
           el("span", { style: "font-size: 2.2rem; line-height: 1;" }, "📝"),
           el("div", { style: "flex: 1; min-width: 0;" },
             el("div", { style: "font-size: 1.15rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.35rem;" }, p.title || p.id),
-            el("div", { style: "display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;" },
-              el("span", { class: "tag tag-accent" }, `📌 ${p.topic || "Общее"}`),
-              el("span", { class: "tag" }, `👥 ${groupBadge}`),
-              el("span", { class: "tag" }, `№${p.order_index ?? p.order ?? 1}`),
+            el("div", { style: "display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.65rem;" },
+              el("span", { class: "badge badge-accent" }, `📌 ${p.topic || "Общее"}`),
+              el("span", { class: "badge badge-gray" }, `👥 ${groupBadge}`),
+              el("span", { class: "badge badge-gray" }, `№${p.order_index ?? p.order ?? 1}`),
               el("span", {
-                class: "tag",
-                style: isPub ? "background: var(--good-soft); color: var(--good); font-weight: 600;" : "background: var(--sunken); color: var(--muted);"
+                class: `badge ${isPub ? "badge-success" : "badge-gray"}`,
+                style: isPub ? "font-weight: 600;" : "color: var(--muted);"
               }, isPub ? "Выдано ✅" : "Черновик (не выдано) 🔒")),
             el("p", { class: "muted", style: "margin: 0; font-size: 0.88rem; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;" },
               p.content ? p.content.slice(0, 150) + "..." : "Текст практики пуст"))),
@@ -4190,19 +4249,19 @@ async function homeworksTab(container) {
         el("span", { style: "font-size: 2.2rem; line-height: 1;" }, "📤"),
         el("div", { style: "flex: 1; min-width: 0;" },
           el("div", { style: "font-size: 1.15rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.35rem;" }, h.title || h.id),
-          el("div", { style: "display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;" },
-            el("span", { class: "tag tag-accent" }, `📌 ${h.topic || "Общее"}`),
-            el("span", { class: "tag" }, `👥 ${groupBadge}`),
-            el("span", { class: "tag" }, `⭐ Макс: ${h.max_score} б.`),
-            h.deadline ? el("span", { class: "tag" }, `🗓️ ${h.deadline}`) : null,
+          el("div", { style: "display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.65rem;" },
+            el("span", { class: "badge badge-accent" }, `📌 ${h.topic || "Общее"}`),
+            el("span", { class: "badge badge-gray" }, `👥 ${groupBadge}`),
+            el("span", { class: "badge badge-warning" }, `⭐ Макс: ${h.max_score} б.`),
+            h.deadline ? el("span", { class: "badge badge-gray" }, `🗓️ ${h.deadline}`) : null,
             el("span", {
-              class: "tag",
-              style: isPub ? "background: var(--good-soft); color: var(--good); font-weight: 600;" : "background: var(--sunken); color: var(--muted);"
+              class: `badge ${isPub ? "badge-success" : "badge-gray"}`,
+              style: isPub ? "font-weight: 600;" : "color: var(--muted);"
             }, isPub ? "Выдано ✅" : "Черновик 🔒")),
-          el("div", { style: "margin-top: 0.6rem; display: flex; align-items: center; gap: 0.5rem;" },
+          el("div", { style: "display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;" },
             el("span", {
-              class: "badge",
-              style: subsCount > 0 ? "background: var(--accent-soft); color: var(--accent-ink); font-weight: 600;" : "background: var(--sunken); color: var(--muted);"
+              class: `badge ${subsCount > 0 ? "badge-success" : "badge-gray"}`,
+              style: subsCount > 0 ? "font-weight: 600;" : "",
             }, `📥 Сдано работ: ${subsCount}`)))),
       el("div", { class: "test-card-actions" },
         el("button", {
@@ -4713,13 +4772,13 @@ function openHomeworkSubmissionsReview(hw, parentContainer) {
           style: "padding: 1.25rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); display: flex; flex-direction: column; gap: 0.75rem;",
         });
 
-        const topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;" },
-          el("div", { style: "display: flex; align-items: center; gap: 0.75rem;" },
-            el("span", { style: "font-weight: 700; font-size: 1.1rem;" }, s.user_name || "Студент"),
-            el("span", { class: "tag tag-accent" }, s.group_name || "Без группы"),
-            el("span", { class: "tag" }, `Отправлено: ${dateStr}`)),
-          el("div", { style: "display: flex; align-items: center; gap: 0.75rem;" },
-            el("span", { class: `badge ${statusClass}`, style: "font-weight: 600; padding: 0.3rem 0.65rem;" }, statusText),
+        const topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.65rem;" },
+          el("div", { style: "display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;" },
+            el("span", { style: "font-weight: 700; font-size: 1.05rem;" }, s.user_name || "Студент"),
+            el("span", { class: "badge badge-accent" }, s.group_name || "Без группы"),
+            el("span", { class: "badge badge-gray" }, `Отправлено: ${dateStr}`)),
+          el("div", { style: "display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;" },
+            el("span", { class: `badge ${statusClass}`, style: "font-weight: 600;" }, statusText),
             el("a", {
               href: fileUrl,
               target: "_blank",
@@ -4815,6 +4874,1267 @@ function openHomeworkSubmissionsReview(hw, parentContainer) {
 
   loadSubmissions();
 }
+
+// ==========================================
+// 8. ВКЛАДКА: ОБРАТНАЯ СВЯЗЬ (FEEDBACK)
+// ==========================================
+
+async function feedbackTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем отзывы…"));
+
+  let filterStatus = "all";
+
+  async function render() {
+    let data;
+    try {
+      data = await json(`/api/admin/feedback?status=${filterStatus}`, { skipCache: true });
+    } catch (err) {
+      container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+      return;
+    }
+
+    const items = data.feedback || [];
+
+    const toolbar = el("div", { class: "admin-controls-row", style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;" },
+      el("div", { style: "display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;" },
+        el("span", { style: "font-size: 0.85rem; font-weight: 600;" }, "Фильтр по статусу:"),
+        el("select", {
+          class: "form-select form-select-sm",
+          onchange: (e) => { filterStatus = e.target.value; render(); },
+        },
+          el("option", { value: "all", selected: filterStatus === "all" }, "Все отзывы"),
+          el("option", { value: "new", selected: filterStatus === "new" }, "Только новые"),
+          el("option", { value: "read", selected: filterStatus === "read" }, "Прочитанные"),
+          el("option", { value: "resolved", selected: filterStatus === "resolved" }, "Решённые")
+        ),
+        el("button", {
+          class: "btn quiet btn-sm",
+          type: "button",
+          onclick: () => render(),
+        }, "🔄 Обновить")
+      ),
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, `Всего обращений: ${items.length}`)
+    );
+
+    const table = el("table", { class: "admin-table", style: "width: 100%; border-collapse: collapse;" },
+      el("thead", {},
+        el("tr", {},
+          el("th", { style: "width: 130px;" }, "Дата"),
+          el("th", { style: "width: 160px;" }, "Автор"),
+          el("th", { style: "width: 110px;" }, "Тип"),
+          el("th", {}, "Текст сообщения"),
+          el("th", { style: "width: 130px;" }, "Статус"),
+          el("th", { style: "width: 140px;" }, "Действие")
+        )
+      ),
+      el("tbody", {},
+        items.length === 0
+          ? el("tr", {}, el("td", { colspan: 6, style: "text-align: center; padding: 2rem; color: var(--muted);" }, "Отзывов не найдено."))
+          : items.map((fb) => {
+              const dateStr = fb.created_at ? new Date(fb.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+              const author = fb.user_name || "Аноним";
+              const typeLabels = { general: "Отзыв", bug: "Баг ⚠️", feature: "Идея 💡" };
+
+              const statusSelect = el("select", {
+                class: "form-select form-select-xs",
+                style: "font-size: 0.8rem; padding: 0.2rem 0.4rem;",
+                onchange: async (e) => {
+                  const newStatus = e.target.value;
+                  try {
+                    await json(`/api/admin/feedback/${encodeURIComponent(fb.id)}`, {
+                      method: "PUT",
+                      body: { status: newStatus },
+                    });
+                    render();
+                  } catch (err) {
+                    alert("Ошибка: " + err.message);
+                  }
+                },
+              },
+                el("option", { value: "new", selected: fb.status === "new" }, "Новое"),
+                el("option", { value: "read", selected: fb.status === "read" }, "Прочитано"),
+                el("option", { value: "resolved", selected: fb.status === "resolved" }, "Решено")
+              );
+
+              return el("tr", {},
+                el("td", { style: "font-size: 0.8rem; color: var(--muted); font-family: var(--font-mono);" }, dateStr),
+                el("td", {},
+                  el("div", { style: "font-weight: 600; font-size: 0.88rem;" }, author),
+                  fb.user_email ? el("div", { style: "font-size: 0.75rem; color: var(--muted);" }, fb.user_email) : ""),
+                el("td", {}, el("span", { class: `badge badge-${fb.type === "bug" ? "danger" : "normal"}` }, typeLabels[fb.type] || fb.type)),
+                el("td", { style: "font-size: 0.88rem; line-height: 1.4; word-break: break-word;" }, fb.message),
+                el("td", {}, statusSelect),
+                el("td", {},
+                  el("button", {
+                    class: "btn quiet btn-xs",
+                    type: "button",
+                    onclick: async () => {
+                      if (!confirm("Пометить как решённое?")) return;
+                      await json(`/api/admin/feedback/${encodeURIComponent(fb.id)}`, { method: "PUT", body: { status: "resolved" } });
+                      render();
+                    },
+                  }, "✓ Решено")
+                )
+              );
+            })
+      )
+    );
+
+    const wrapper = el("div", { class: "admin-section" },
+      el("h2", { style: "margin: 0 0 1rem; font-size: 1.25rem;" }, "💬 Система обратной связи от студентов"),
+      toolbar,
+      el("div", { class: "table-responsive" }, table)
+    );
+
+    container.replaceChildren(wrapper);
+  }
+
+  render();
+}
+
+// ==========================================
+// 9. ВКЛАДКА: ЗАЯВКИ НА КОНСУЛЬТАЦИИ
+// ==========================================
+
+async function requestsTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем заявки…"));
+
+  let filterStatus = "all";
+
+  async function render() {
+    let data;
+    try {
+      data = await json(`/api/admin/consultations/requests?status=${filterStatus}`);
+    } catch (err) {
+      container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+      return;
+    }
+
+    const items = data.requests || [];
+
+    const toolbar = el("div", { class: "admin-controls-row", style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;" },
+      el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+        el("span", { style: "font-size: 0.85rem; font-weight: 600;" }, "Фильтр заявок:"),
+        el("select", {
+          class: "form-select form-select-sm",
+          onchange: (e) => { filterStatus = e.target.value; render(); },
+        },
+          el("option", { value: "all", selected: filterStatus === "all" }, "Все заявки"),
+          el("option", { value: "pending", selected: filterStatus === "pending" }, "Ожидают решения (pending)"),
+          el("option", { value: "approved", selected: filterStatus === "approved" }, "Одобренные"),
+          el("option", { value: "rejected", selected: filterStatus === "rejected" }, "Отклонённые")
+        )
+      ),
+      el("span", { class: "muted", style: "font-size: 0.85rem;" }, `Всего заявок: ${items.length}`)
+    );
+
+    const cardsList = el("div", { style: "display: flex; flex-direction: column; gap: 1rem;" });
+
+    if (items.length === 0) {
+      cardsList.append(el("p", { class: "muted", style: "padding: 2rem; text-align: center;" }, "Заявок в этой категории нет."));
+    } else {
+      items.forEach((req) => {
+        const dateStr = req.created_at ? new Date(req.created_at).toLocaleString("ru-RU") : "—";
+        const typeLabels = { consultation: "Консультация", extra_lecture: "Дополнительная лекция" };
+
+        const commentInput = el("input", {
+          type: "text",
+          class: "form-input form-input-sm",
+          placeholder: "Комментарий преподавателя (время, аудитория или ссылка)",
+          value: req.teacher_comment || "",
+          style: "flex: 1;",
+        });
+
+        const approveBtn = el("button", {
+          class: "btn primary btn-sm",
+          type: "button",
+          onclick: async () => {
+            approveBtn.disabled = true;
+            try {
+              await json(`/api/admin/consultations/requests/${encodeURIComponent(req.id)}`, {
+                method: "PUT",
+                body: { status: "approved", teacher_comment: commentInput.value.trim() },
+              });
+              render();
+            } catch (err) {
+              alert("Ошибка: " + err.message);
+              approveBtn.disabled = false;
+            }
+          },
+        }, "✓ Одобрить");
+
+        const rejectBtn = el("button", {
+          class: "btn quiet btn-sm",
+          type: "button",
+          onclick: async () => {
+            if (!confirm("Отклонить заявку?")) return;
+            try {
+              await json(`/api/admin/consultations/requests/${encodeURIComponent(req.id)}`, {
+                method: "PUT",
+                body: { status: "rejected", teacher_comment: commentInput.value.trim() },
+              });
+              render();
+            } catch (err) {
+              alert("Ошибка: " + err.message);
+            }
+          },
+        }, "✕ Отклонить");
+
+        let statusBadge = "";
+        if (req.status === "approved") statusBadge = el("span", { class: "badge badge-success" }, "Одобрено");
+        else if (req.status === "rejected") statusBadge = el("span", { class: "badge badge-danger" }, "Отклонено");
+        else statusBadge = el("span", { class: "badge badge-warning" }, "Ожидает решения");
+
+        const card = el("div", { class: "card", style: "padding: 1.25rem; border: 1px solid var(--border);" },
+          el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;" },
+            el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+              el("span", { class: "badge badge-topic" }, typeLabels[req.type] || req.type),
+              el("strong", { style: "font-size: 1.05rem;" }, req.topic),
+              el("span", { class: "badge badge-group-info" }, req.group_name || "—")
+            ),
+            statusBadge
+          ),
+          el("div", { style: "font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem;" },
+            `Студент: ${req.user_name} (${req.user_email || "без email"}) · Предпочтительный слот: `,
+            el("strong", { style: "color: var(--accent);" }, req.preferred_time),
+            ` · Подано: ${dateStr}`
+          ),
+          req.comment ? el("p", { style: "font-size: 0.9rem; margin: 0.35rem 0 0.75rem; background: rgba(255,255,255,0.02); padding: 0.5rem; border-radius: var(--radius-sm);" }, req.comment) : "",
+          el("div", { style: "display: flex; gap: 0.5rem; align-items: center; padding-top: 0.75rem; border-top: 1px dashed var(--line); flex-wrap: wrap;" },
+            commentInput,
+            approveBtn,
+            rejectBtn
+          )
+        );
+
+        cardsList.append(card);
+      });
+    }
+
+    container.replaceChildren(
+      el("div", { class: "admin-section" },
+        el("h2", { style: "margin: 0 0 1rem; font-size: 1.25rem;" }, "🤝 Заявки на проведение консультаций и доп. лекций"),
+        toolbar,
+        cardsList
+      )
+    );
+  }
+
+  render();
+}
+
+// ==========================================
+// 10. ВКЛАДКА: ТИПОВИКИ И БАНК ВОПРОСОВ
+// ==========================================
+
+let activeTypovikId = "typ_1";
+let activeTypovikSection = "config"; // "config" | "bank" | "submissions"
+
+async function typoviksTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем типовые расчеты…"));
+
+  let typoviksData;
+  try {
+    typoviksData = await json("/api/admin/typoviks");
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+    return;
+  }
+
+  const typoviks = typoviksData.typoviks || [];
+  if (typoviks.length === 0) {
+    container.replaceChildren(el("p", { class: "muted" }, "Типовые расчеты не найдены."));
+    return;
+  }
+
+  if (!typoviks.some((t) => t.id === activeTypovikId)) {
+    activeTypovikId = typoviks[0].id;
+  }
+
+  const currentTypovik = typoviks.find((t) => t.id === activeTypovikId) || typoviks[0];
+
+  // 1. Селектор 4 типовиков
+  const typovikPills = el("div", { class: "grades-tabs-scroll", style: "display: flex; gap: 0.4rem; margin-bottom: 1rem; overflow-x: auto;" },
+    typoviks.map((t) => el("button", {
+      class: `grades-group-tab ${t.id === activeTypovikId ? "active" : ""}`,
+      type: "button",
+      onclick: () => { activeTypovikId = t.id; typoviksTab(container); },
+    }, t.title || t.id))
+  );
+
+  // 2. Внутренние разделы выбранного типовика
+  const subNav = el("div", { class: "admin-segmented-nav", style: "margin-bottom: 1.25rem;", role: "tablist" },
+    el("button", {
+      class: `admin-nav-item ${activeTypovikSection === "config" ? "active" : ""}`,
+      type: "button",
+      onclick: () => { activeTypovikSection = "config"; typoviksTab(container); },
+    }, "⚙️ Конфигурация варианта"),
+    el("button", {
+      class: `admin-nav-item ${activeTypovikSection === "bank" ? "active" : ""}`,
+      type: "button",
+      onclick: () => { activeTypovikSection = "bank"; typoviksTab(container); },
+    }, "🗄️ Банк задач типовика"),
+    el("button", {
+      class: `admin-nav-item ${activeTypovikSection === "submissions" ? "active" : ""}`,
+      type: "button",
+      onclick: () => { activeTypovikSection = "submissions"; typoviksTab(container); },
+    }, "📥 Сданные работы и проверка")
+  );
+
+  const contentArea = el("div", { id: "typovik-section-content" });
+
+  const addTypovikBtn = el("button", {
+    class: "btn quiet btn-sm",
+    type: "button",
+    onclick: () => openCreateTypovikModal(() => typoviksTab(container)),
+  }, "+ Новый типовой расчет");
+
+  container.replaceChildren(
+    el("div", { style: "display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;" },
+      el("div", { style: "flex: 1; min-width: 260px;" },
+        el("div", { style: "font-size: 0.85rem; color: var(--muted); margin-bottom: 0.4rem;" }, "Выберите типовой расчет курса:"),
+        typovikPills
+      ),
+      addTypovikBtn
+    ),
+    subNav,
+    contentArea
+  );
+
+  if (activeTypovikSection === "bank") {
+    renderTypovikBank(contentArea, currentTypovik);
+  } else if (activeTypovikSection === "submissions") {
+    renderTypovikSubmissions(contentArea, currentTypovik);
+  } else {
+    renderTypovikConfig(contentArea, currentTypovik, () => typoviksTab(container));
+  }
+}
+
+async function renderTypovikConfig(container, typ, onRefresh) {
+  // Загружаем задачи банка для этого типовика, чтобы увидеть доступные темы
+  let bank;
+  try {
+    bank = await json(`/api/admin/question-bank?typovik_id=${encodeURIComponent(typ.id)}`);
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+    return;
+  }
+
+  const items = bank.items || [];
+  const topicsMap = new Map();
+  for (const it of items) {
+    const bId = it.block_id || "general";
+    if (!topicsMap.has(bId)) {
+      topicsMap.set(bId, { title: it.block_title || bId, count: 0 });
+    }
+    topicsMap.get(bId).count++;
+  }
+
+  const curConfig = Array.isArray(typ.blocks_config) ? [...typ.blocks_config] : [];
+  // Убеждаемся, что все существующие в банке темы есть в конфигурации (или добавляем)
+  for (const [bId, bInfo] of topicsMap.entries()) {
+    if (!curConfig.some((c) => c.block_id === bId)) {
+      curConfig.push({ block_id: bId, block_title: bInfo.title, questions_count: 1 });
+    }
+  }
+
+  const deadlineInput = el("input", { type: "text", class: "form-input form-input-sm", value: typ.deadline || "", placeholder: "2026-12-15 23:59" });
+  const maxScoreInput = el("input", { type: "number", class: "form-input form-input-sm", value: typ.max_score || 25, min: 1, style: "width: 100px;" });
+  const groupInput = el("input", { type: "text", class: "form-input form-input-sm", value: typ.group_name || "all", placeholder: "all или M3101, M3102" });
+
+  const rowsContainer = el("div", { style: "display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;" });
+
+  curConfig.forEach((cfgItem) => {
+    const available = topicsMap.get(cfgItem.block_id)?.count || 0;
+    const countInput = el("input", {
+      type: "number",
+      class: "form-input form-input-sm",
+      value: cfgItem.questions_count || 1,
+      min: 0,
+      max: 20,
+      style: "width: 80px;",
+    });
+    countInput.oninput = () => {
+      cfgItem.questions_count = parseInt(countInput.value, 10) || 0;
+    };
+
+    const blockTitleInput = el("input", {
+      type: "text",
+      class: "form-input form-input-sm",
+      value: cfgItem.block_title || cfgItem.block_id,
+      style: "flex: 1;",
+    });
+    blockTitleInput.oninput = () => {
+      cfgItem.block_title = blockTitleInput.value.trim();
+    };
+
+    const row = el("div", { class: "card", style: "padding: 0.85rem 1.15rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--border);" },
+      el("div", { style: "display: flex; align-items: center; gap: 0.75rem; flex: 1;" },
+        el("span", { class: "badge badge-topic" }, cfgItem.block_id),
+        blockTitleInput,
+        el("span", { class: "muted", style: "font-size: 0.82rem; white-space: nowrap;" }, `(в банке: ${available} задач)`)
+      ),
+      el("div", { style: "display: flex; align-items: center; gap: 0.5rem;" },
+        el("span", { style: "font-size: 0.85rem; color: var(--muted);" }, "Брать в вариант:"),
+        countInput,
+        el("span", { style: "font-size: 0.85rem;" }, "задач")
+      )
+    );
+
+    rowsContainer.append(row);
+  });
+
+  const isPub = Boolean(typ.is_published);
+  const publishBtn = el("button", {
+    class: `btn btn-sm btn-visibility-toggle ${isPub ? "is-visible" : "is-hidden"}`,
+    type: "button",
+    onclick: async () => {
+      publishBtn.disabled = true;
+      try {
+        await json(`/api/admin/typoviks/${encodeURIComponent(typ.id)}`, {
+          method: "PUT",
+          body: { is_published: isPub ? 0 : 1 },
+        });
+        onRefresh();
+      } catch (e) {
+        alert("Ошибка: " + e.message);
+        publishBtn.disabled = false;
+      }
+    },
+  }, isPub ? "✅ Выложено студентам" : "🔒 Черновик (не выложено)");
+
+  const saveBtn = el("button", {
+    class: "btn primary btn-sm",
+    type: "button",
+    onclick: async () => {
+      saveBtn.disabled = true;
+      try {
+        const payload = {
+          title: typ.title,
+          topic: typ.topic,
+          group_name: groupInput.value.trim() || "all",
+          deadline: deadlineInput.value.trim(),
+          max_score: parseFloat(maxScoreInput.value) || 25,
+          blocks_config: curConfig.filter((c) => c.questions_count > 0),
+          is_published: typ.is_published,
+        };
+        await json(`/api/admin/typoviks/${encodeURIComponent(typ.id)}`, { method: "PUT", body: payload });
+        alert("Конфигурация типового расчета успешно сохранена!");
+        onRefresh();
+      } catch (err) {
+        alert("Ошибка сохранения: " + err.message);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    },
+  }, "💾 Сохранить конфигурацию");
+
+  const generateBtn = el("button", {
+    class: "btn accent btn-sm",
+    style: "background: var(--accent); color: var(--ink); font-weight: 600;",
+    type: "button",
+    onclick: async () => {
+      if (!confirm(`Сгенерировать и выложить персональные варианты по типовику «${typ.title}» для всех целевых студентов? Работа автоматически станет доступна студентам.`)) return;
+      generateBtn.disabled = true;
+      generateBtn.textContent = "Генерация вариантов…";
+      try {
+        const res = await json(`/api/admin/typoviks/${encodeURIComponent(typ.id)}/generate`, { method: "POST" });
+        alert(`Успешно сгенерировано ${res.generatedCount} уникальных вариантов! Работа открыта для студентов.`);
+        onRefresh();
+      } catch (err) {
+        alert("Ошибка генерации вариантов: " + err.message);
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = "🎲 Сгенерировать и выложить варианты студентам";
+      }
+    },
+  }, "🎲 Сгенерировать и выложить варианты студентам");
+
+  const settingsCard = el("div", { class: "card", style: "padding: 1.25rem; border: 1px solid var(--border); margin-bottom: 1.25rem;" },
+    el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--line); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.75rem;" },
+      el("div", { style: "display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;" },
+        el("h3", { style: "margin: 0; font-size: 1.15rem;" }, typ.title),
+        el("span", { class: `badge ${isPub ? "badge-success" : "badge-gray"}`, style: "font-weight: 600;" },
+          isPub ? "Опубликовано ✅" : "Черновик 🔒")
+      ),
+      el("div", { style: "display: flex; gap: 0.5rem; flex-wrap: wrap;" }, publishBtn, saveBtn, generateBtn)
+    ),
+    el("div", { style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;" },
+      el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Дедлайн"), deadlineInput),
+      el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Максимальный балл"), maxScoreInput),
+      el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Группы (all для всех)"), groupInput)
+    ),
+    el("div", { style: "margin-top: 1.25rem;" },
+      el("h4", { style: "margin: 0 0 0.5rem 0; font-size: 0.95rem; color: var(--accent);" }, "Правила выборки задач в вариант по темам:"),
+      rowsContainer
+    )
+  );
+
+  container.replaceChildren(settingsCard);
+}
+
+function openCreateTypovikModal(onCreated) {
+  const dlg = el("dialog", { class: "auth-modal-dialog" });
+  document.body.append(dlg);
+
+  const titleInput = el("input", { type: "text", class: "form-input", placeholder: "Типовой расчет №5: Теория автоматов", required: true });
+  const topicInput = el("input", { type: "text", class: "form-input", placeholder: "Теория автоматов", required: true });
+  const groupInput = el("input", { type: "text", class: "form-input", placeholder: "all или M3101", value: "all" });
+  const deadlineInput = el("input", { type: "text", class: "form-input", placeholder: "2026-12-25 23:59", value: "" });
+  const scoreInput = el("input", { type: "number", class: "form-input", value: 20, min: 1, max: 100 });
+
+  const form = el("form", {},
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Название работы"), titleInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Тема / раздел"), topicInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Целевые группы (all для всех)"), groupInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Срок сдачи (дедлайн)"), deadlineInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Максимальный балл"), scoreInput),
+    el("div", { style: "display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem;" },
+      el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => { dlg.close(); dlg.remove(); } }, "Отмена"),
+      el("button", { class: "btn primary btn-sm", type: "submit" }, "Создать работу")
+    )
+  );
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      title: titleInput.value.trim(),
+      topic: topicInput.value.trim(),
+      group_name: groupInput.value.trim() || "all",
+      deadline: deadlineInput.value.trim(),
+      max_score: parseFloat(scoreInput.value) || 20,
+      is_published: 1,
+      blocks_config: [],
+    };
+    try {
+      const res = await json("/api/admin/typoviks", { method: "POST", body: payload });
+      if (res.typovik?.id) activeTypovikId = res.typovik.id;
+      dlg.close();
+      dlg.remove();
+      if (onCreated) onCreated();
+    } catch (err) {
+      alert("Ошибка: " + err.message);
+    }
+  };
+
+  const box = el("div", { class: "auth-modal-box", style: "max-width: 500px;" },
+    el("h3", { class: "auth-modal-title", style: "margin-bottom: 1rem;" }, "➕ Новый типовой расчет"),
+    form
+  );
+  dlg.replaceChildren(box);
+  dlg.showModal();
+}
+
+async function renderTypovikBank(container, typ) {
+  let bank;
+  try {
+    bank = await json(`/api/admin/question-bank?typovik_id=${encodeURIComponent(typ.id)}`);
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+    return;
+  }
+
+  const items = bank.items || [];
+
+  const addBtn = el("button", {
+    class: "btn primary btn-sm",
+    type: "button",
+    onclick: () => openQuestionModal({ typovik_id: typ.id }, () => renderTypovikBank(container, typ)),
+  }, `+ Добавить вопрос в банк (${typ.title})`);
+
+  const headerRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;" },
+    el("h3", { style: "margin: 0; font-size: 1.15rem;" }, `Банк задач: ${typ.title} (${items.length} задач)`),
+    addBtn
+  );
+
+  const listEl = el("div", { style: "display: flex; flex-direction: column; gap: 0.85rem;" });
+  if (items.length === 0) {
+    listEl.append(el("p", { class: "muted", style: "padding: 2rem; text-align: center;" }, "В банке этого типовика пока нет задач. Добавьте задачи."));
+  } else {
+    items.forEach((item) => {
+      const card = el("div", { class: "card", style: "padding: 1rem 1.25rem; border: 1px solid var(--border);" },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;" },
+          el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+            el("span", { class: "badge badge-topic" }, `[${item.block_id}] ${item.block_title}`),
+            el("strong", { style: "font-size: 1rem;" }, item.title)
+          ),
+          el("div", { style: "display: flex; gap: 0.5rem; align-items: center;" },
+            el("span", { class: "badge badge-score" }, `${item.max_score} pts`),
+            el("button", { class: "btn quiet btn-xs", onclick: () => openQuestionModal(item, () => renderTypovikBank(container, typ)) }, "✏️"),
+            el("button", {
+              class: "btn quiet btn-xs",
+              onclick: async () => {
+                if (!confirm("Удалить задачу из банка?")) return;
+                await json(`/api/admin/question-bank/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+                renderTypovikBank(container, typ);
+              },
+            }, "🗑️")
+          )
+        ),
+        el("div", { class: "katex-content", style: "font-size: 0.88rem; color: var(--muted); line-height: 1.4;" }, item.content)
+      );
+      listEl.append(card);
+    });
+  }
+
+  container.replaceChildren(headerRow, listEl);
+
+  if (window.renderMathInElement) {
+    try {
+      window.renderMathInElement(container, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+        ],
+        throwOnError: false,
+      });
+    } catch {}
+  }
+}
+
+function openQuestionModal(item, onSave) {
+  const dlg = el("dialog", { class: "auth-modal-dialog" });
+  document.body.append(dlg);
+
+  const typovikIdInput = el("input", { type: "text", class: "form-input", value: item?.typovik_id || activeTypovikId, readonly: true, style: "opacity: 0.7;" });
+  const blockIdInput = el("input", { type: "text", class: "form-input", placeholder: "t1_rel / t2_conn", value: item?.block_id || "general", required: true });
+  const blockTitleInput = el("input", { type: "text", class: "form-input", placeholder: "Бинарные отношения", value: item?.block_title || "Тема задач", required: true });
+  const titleInput = el("input", { type: "text", class: "form-input", placeholder: "Название задачи", value: item?.title || "", required: true });
+  const contentInput = el("textarea", { class: "form-input", rows: 5, placeholder: "Условие задачи с формулами KaTeX ($...$)", value: item?.content || "", required: true, style: "resize: vertical;" });
+  const scoreInput = el("input", { type: "number", class: "form-input", value: item?.max_score || 5, min: 1, max: 50 });
+
+  const form = el("form", {},
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Типовой расчет (ID)"), typovikIdInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Идентификатор темы/блока (ID)"), blockIdInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Название темы"), blockTitleInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Заголовок задачи"), titleInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Условие задачи"), contentInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Макс. балл за задачу"), scoreInput),
+    el("div", { style: "display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem;" },
+      el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => { dlg.close(); dlg.remove(); } }, "Отмена"),
+      el("button", { class: "btn primary btn-sm", type: "submit" }, "Сохранить")
+    )
+  );
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      typovik_id: typovikIdInput.value.trim(),
+      block_id: blockIdInput.value.trim(),
+      block_title: blockTitleInput.value.trim(),
+      title: titleInput.value.trim(),
+      content: contentInput.value.trim(),
+      max_score: parseFloat(scoreInput.value) || 5,
+    };
+    try {
+      if (item && item.id) {
+        await json(`/api/admin/question-bank/${encodeURIComponent(item.id)}`, { method: "PUT", body: payload });
+      } else {
+        await json("/api/admin/question-bank", { method: "POST", body: payload });
+      }
+      dlg.close();
+      dlg.remove();
+      if (onSave) onSave();
+    } catch (err) {
+      alert("Ошибка: " + err.message);
+    }
+  };
+
+  const box = el("div", { class: "auth-modal-box", style: "max-width: 560px;" },
+    el("h3", { class: "auth-modal-title", style: "margin-bottom: 1rem;" }, item?.id ? "Редактировать задачу банка" : "Новая задача в банк"),
+    form
+  );
+
+  dlg.replaceChildren(box);
+  dlg.showModal();
+}
+
+async function renderTypovikSubmissions(container, typ) {
+  let data;
+  try {
+    data = await json(`/api/admin/typoviks/${encodeURIComponent(typ.id)}/submissions`);
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+    return;
+  }
+
+  const subs = data.submissions || [];
+
+  const headerRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;" },
+    el("h3", { style: "margin: 0; font-size: 1.15rem;" }, `Сданные работы студентов (${subs.length})`)
+  );
+
+  const listEl = el("div", { style: "display: flex; flex-direction: column; gap: 1rem;" });
+  if (subs.length === 0) {
+    listEl.append(el("p", { class: "muted", style: "padding: 2.5rem; text-align: center;" }, "Сданных работ по этому типовику пока нет."));
+  } else {
+    subs.forEach((s) => {
+      const dateStr = s.submitted_at ? new Date(s.submitted_at).toLocaleString("ru-RU") : "—";
+
+      let previewElement;
+      if (s.file_type === "image" || s.file_type === "images" || (Array.isArray(s.images) && s.images.length > 0)) {
+        const imgs = (Array.isArray(s.images) && s.images.length > 0) ? s.images : [s.file_path];
+        previewElement = el("div", { style: "margin-top: 0.5rem;" },
+          el("div", { style: "font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem;" }, `📷 Прикрепленные фотографии (${imgs.length} шт.):`),
+          el("div", { class: "submission-images-grid" },
+            imgs.map((src) => {
+              const fullUrl = src.startsWith("/") ? src : `/api/uploads/images/${encodeURIComponent(src)}`;
+              return el("img", {
+                src: fullUrl,
+                class: "sub-image-thumb",
+                alt: "Фото решения",
+                title: "Нажмите для просмотра в полном размере",
+                onclick: () => window.open(fullUrl, "_blank"),
+              });
+            })
+          )
+        );
+      } else {
+        const fileUrl = `/api/uploads/homeworks/${encodeURIComponent(s.file_path)}`;
+        previewElement = el("div", { style: "margin-top: 0.5rem;" },
+          el("a", { href: fileUrl, target: "_blank", rel: "noopener", class: "btn btn-sm" }, `📄 Открыть PDF (${s.file_name || "solution.pdf"})`)
+        );
+      }
+
+      const verdictSelect = el("select", { class: "form-select form-select-sm" },
+        el("option", { value: "passed", selected: s.status === "passed" }, "Зачёт (passed)"),
+        el("option", { value: "pending", selected: s.status === "pending" }, "На проверке (pending)"),
+        el("option", { value: "revise", selected: s.status === "revise" }, "Доработка (revise)"),
+        el("option", { value: "failed", selected: s.status === "failed" }, "Незачёт (failed)")
+      );
+
+      const scoreInput = el("input", { type: "number", class: "form-input form-input-sm", value: s.score || 0, max: typ.max_score, min: 0, style: "width: 80px;" });
+      const commentInput = el("input", { type: "text", class: "form-input form-input-sm", placeholder: "Комментарий преподавателя", value: s.teacher_comment || "", style: "flex: 1;" });
+
+      const saveBtn = el("button", {
+        class: "btn primary btn-sm",
+        type: "button",
+        onclick: async () => {
+          saveBtn.disabled = true;
+          try {
+            await json(`/api/admin/typoviks/submissions/${encodeURIComponent(s.id)}/review`, {
+              method: "PUT",
+              body: {
+                status: verdictSelect.value,
+                score: parseFloat(scoreInput.value) || 0,
+                teacher_comment: commentInput.value.trim(),
+              },
+            });
+            saveBtn.textContent = "✅ Сохранено";
+            setTimeout(() => {
+              saveBtn.disabled = false;
+              saveBtn.textContent = "💾 Сохранить оценку";
+            }, 1000);
+          } catch (err) {
+            alert("Ошибка сохранения: " + err.message);
+            saveBtn.disabled = false;
+          }
+        },
+      }, "💾 Сохранить оценку");
+
+      const card = el("div", { class: "card", style: "padding: 1.25rem; border: 1px solid var(--border);" },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;" },
+          el("div", { style: "display: flex; align-items: center; gap: 0.6rem;" },
+            el("strong", { style: "font-size: 1.05rem;" }, s.user_name || "Студент"),
+            el("span", { class: "badge badge-group-info" }, s.group_name || "—"),
+            el("span", { class: `badge ${s.status === "passed" ? "badge-score" : "badge-deadline"}` }, s.status)
+          ),
+          el("span", { style: "font-size: 0.82rem; color: var(--muted);" }, `Сдано: ${dateStr}`)
+        ),
+        previewElement,
+        el("div", { style: "display: flex; gap: 0.6rem; align-items: center; padding-top: 0.85rem; margin-top: 0.85rem; border-top: 1px dashed var(--line); flex-wrap: wrap;" },
+          verdictSelect,
+          el("span", { style: "font-size: 0.85rem;" }, `Балл / ${typ.max_score}:`),
+          scoreInput,
+          commentInput,
+          saveBtn
+        )
+      );
+
+      listEl.append(card);
+    });
+  }
+
+  container.replaceChildren(headerRow, listEl);
+}
+
+// ==========================================
+// 11. ВКЛАДКА: УПРАВЛЕНИЕ РАСПИСАНИЕМ
+// ==========================================
+
+async function scheduleTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем расписание…"));
+
+  let eventsData;
+  try {
+    eventsData = await json("/api/schedule");
+  } catch (err) {
+    container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+    return;
+  }
+
+  const events = eventsData.events || [];
+
+  const addBtn = el("button", {
+    class: "btn primary btn-sm",
+    type: "button",
+    onclick: () => openScheduleEventModal(null, () => scheduleTab(container)),
+  }, "+ Добавить событие в расписание");
+
+  const headerRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;" },
+    el("h2", { style: "margin: 0; font-size: 1.25rem;" }, `📅 Управление расписанием (${events.length} событий)`),
+    addBtn
+  );
+
+  const table = el("table", { class: "admin-table", style: "width: 100%; border-collapse: collapse;" },
+    el("thead", {},
+      el("tr", {},
+        el("th", { style: "width: 140px;" }, "Время"),
+        el("th", { style: "width: 100px;" }, "Тип"),
+        el("th", {}, "Название"),
+        el("th", { style: "width: 140px;" }, "Аудитория/URL"),
+        el("th", { style: "width: 140px;" }, "Преподаватель"),
+        el("th", { style: "width: 110px;" }, "Группы"),
+        el("th", { style: "width: 100px;" }, "Действия")
+      )
+    ),
+    el("tbody", {},
+      events.length === 0
+        ? el("tr", {}, el("td", { colspan: 7, style: "text-align: center; padding: 2rem; color: var(--muted);" }, "Событий в расписании пока нет."))
+        : events.map((ev) => {
+            const timeStr = `${ev.starts_at ? ev.starts_at.slice(0, 16).replace("T", " ") : "—"}`;
+            let groupsLabel = "Все группы";
+            if (ev.groups && ev.groups !== "all") {
+              try {
+                const arr = JSON.parse(ev.groups);
+                groupsLabel = Array.isArray(arr) ? arr.join(", ") : ev.groups;
+              } catch {
+                groupsLabel = ev.groups;
+              }
+            }
+
+            return el("tr", {},
+              el("td", { style: "font-size: 0.8rem; font-family: var(--font-mono);" }, timeStr),
+              el("td", {}, el("span", { class: "badge" }, ev.type || "lecture")),
+              el("td", { style: "font-weight: 600;" }, ev.title),
+              el("td", { style: "font-size: 0.85rem;" }, ev.location || "—"),
+              el("td", { style: "font-size: 0.85rem;" }, ev.teacher_name || "—"),
+              el("td", { style: "font-size: 0.85rem;" }, groupsLabel),
+              el("td", {},
+                el("button", { class: "btn quiet btn-xs", onclick: () => openScheduleEventModal(ev, () => scheduleTab(container)) }, "✏️"),
+                el("button", {
+                  class: "btn quiet btn-xs",
+                  onclick: async () => {
+                    if (!confirm(`Удалить событие «${ev.title}»?`)) return;
+                    await json(`/api/admin/schedule/${encodeURIComponent(ev.id)}`, { method: "DELETE" });
+                    scheduleTab(container);
+                  },
+                }, "🗑️")
+              )
+            );
+          })
+    )
+  );
+
+  container.replaceChildren(
+    el("div", { class: "admin-section" },
+      headerRow,
+      el("div", { class: "table-responsive" }, table)
+    )
+  );
+}
+
+function openScheduleEventModal(ev, onSave) {
+  const dlg = el("dialog", { class: "auth-modal-dialog" });
+  document.body.append(dlg);
+
+  const titleInput = el("input", { type: "text", class: "form-input", placeholder: "Лекция: Теория графов", value: ev?.title || "", required: true });
+  const typeSelect = el("select", { class: "form-input" },
+    el("option", { value: "lecture", selected: ev?.type === "lecture" }, "Лекция"),
+    el("option", { value: "practice", selected: ev?.type === "practice" }, "Практика"),
+    el("option", { value: "extra_lecture", selected: ev?.type === "extra_lecture" }, "Дополнительная лекция"),
+    el("option", { value: "consultation", selected: ev?.type === "consultation" }, "Консультация")
+  );
+  const startsInput = el("input", { type: "text", class: "form-input", placeholder: "2026-10-15 10:00", value: ev?.starts_at ? ev.starts_at.slice(0, 16).replace("T", " ") : "", required: true });
+  const endsInput = el("input", { type: "text", class: "form-input", placeholder: "2026-10-15 11:30", value: ev?.ends_at ? ev.ends_at.slice(0, 16).replace("T", " ") : "" });
+  const locationInput = el("input", { type: "text", class: "form-input", placeholder: "Ауд. 1404 или Ссылка Zoom", value: ev?.location || "" });
+  const teacherInput = el("input", { type: "text", class: "form-input", placeholder: "Поляков В.И.", value: ev?.teacher_name || "" });
+  const groupsInput = el("input", { type: "text", class: "form-input", placeholder: "all или M3101, M3102", value: ev?.groups || "all" });
+  const descInput = el("textarea", { class: "form-input", rows: 3, placeholder: "Описание, материалы к паре...", value: ev?.description || "" });
+
+  const form = el("form", {},
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Название события"), titleInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Тип занятия"), typeSelect),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Время начала (ГГГГ-ММ-ДД ЧЧ:ММ)"), startsInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Время окончания"), endsInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Место проведения (аудитория или ссылка)"), locationInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "ФИО преподавателя"), teacherInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Группы (all для всех)"), groupsInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Описание"), descInput),
+    el("div", { style: "display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem;" },
+      el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => { dlg.close(); dlg.remove(); } }, "Отмена"),
+      el("button", { class: "btn primary btn-sm", type: "submit" }, "Сохранить")
+    )
+  );
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    let startsIso = startsInput.value.trim().replace(" ", "T");
+    let endsIso = endsInput.value.trim().replace(" ", "T");
+
+    const payload = {
+      title: titleInput.value.trim(),
+      type: typeSelect.value,
+      starts_at: startsIso,
+      ends_at: endsIso,
+      location: locationInput.value.trim(),
+      teacher_name: teacherInput.value.trim(),
+      groups: groupsInput.value.trim() || "all",
+      description: descInput.value.trim(),
+    };
+
+    try {
+      if (ev && ev.id) {
+        await json(`/api/admin/schedule/${encodeURIComponent(ev.id)}`, { method: "PUT", body: payload });
+      } else {
+        await json("/api/admin/schedule", { method: "POST", body: payload });
+      }
+      dlg.close();
+      dlg.remove();
+      if (onSave) onSave();
+    } catch (err) {
+      alert("Ошибка: " + err.message);
+    }
+  };
+
+  const box = el("div", { class: "auth-modal-box", style: "max-width: 560px;" },
+    el("h3", { class: "auth-modal-title", style: "margin-bottom: 1rem;" }, ev ? "Редактировать событие" : "Новое событие расписания"),
+    form
+  );
+
+  dlg.replaceChildren(box);
+  dlg.showModal();
+}
+
+// ==========================================
+// 12. ВКЛАДКА: ЭЛЕКТРОННЫЙ ЖУРНАЛ ОЦЕНОК
+// ==========================================
+
+async function gradesTab(container) {
+  container.replaceChildren(el("p", { class: "muted" }, "Загружаем электронный журнал оценок…"));
+
+  let curGroup = "all";
+
+  async function render() {
+    let sheet;
+    try {
+      sheet = await json(`/api/grades?group=${curGroup}`);
+    } catch (err) {
+      container.replaceChildren(el("p", { class: "form-error" }, `Ошибка: ${err.message}`));
+      return;
+    }
+
+    const groups = sheet.groups || ["all"];
+    const columns = sheet.columns || [];
+    const rows = sheet.rows || [];
+
+    const groupTabs = el("div", { class: "grades-tabs-scroll", style: "display: flex; gap: 0.35rem; margin-bottom: 1rem; overflow-x: auto;" },
+      groups.map((g) => el("button", {
+        class: `grades-group-tab ${g === curGroup ? "active" : ""}`,
+        type: "button",
+        onclick: () => { curGroup = g; render(); },
+      }, g === "all" ? "Весь поток" : g))
+    );
+
+    const addColBtn = el("button", {
+      class: "btn primary btn-sm",
+      type: "button",
+      onclick: () => openAddColumnModal(render),
+    }, "+ Добавить столбец");
+
+    const table = el("table", { class: "grades-spreadsheet-table admin-grades-table" },
+      el("thead", {},
+        el("tr", {},
+          el("th", { class: "col-fixed-num" }, "#"),
+          el("th", { class: "col-fixed-name" }, "Студент"),
+          el("th", { class: "col-fixed-group" }, "Группа"),
+          columns.map((c) => el("th", {
+            class: `col-task ${c.is_calculated ? "col-calculated" : ""}`,
+            title: c.is_calculated ? `Формула: ${c.formula || "SUM"}` : `Макс: ${c.max}`,
+          },
+            el("div", { class: "col-header-wrap" },
+              el("span", { class: "col-title" }, c.title),
+              el("button", {
+                class: "col-settings-btn",
+                title: "Настроить столбец",
+                type: "button",
+                onclick: (e) => {
+                  e.stopPropagation();
+                  openEditColumnModal(c, render);
+                },
+              }, "⚙️")
+            ),
+            el("div", { style: "display: flex; align-items: center; justify-content: center; gap: 0.35rem; margin-top: 0.2rem;" },
+              el("span", { class: "col-max" }, `${c.max} pts`),
+              c.is_calculated ? el("span", { class: "col-fx-badge", title: c.formula || "SUM" }, "fx") : null
+            )
+          )),
+          el("th", { class: "col-total" }, "Итог")
+        )
+      ),
+      el("tbody", {},
+        rows.map((row, idx) => {
+          return el("tr", { "data-user-id": row.userId },
+            el("td", { class: "cell-num" }, idx + 1),
+            el("td", { class: "cell-name" }, el("span", { class: "student-name-text" }, row.name)),
+            el("td", { class: "cell-group" }, row.group),
+            columns.map((col) => {
+              const val = row.scores[col.key] !== undefined ? row.scores[col.key] : "";
+
+              if (col.is_calculated) {
+                return el("td", {
+                  class: "cell-score cell-calculated",
+                  "data-col": col.key,
+                  "data-user": row.userId,
+                  title: `Вычисляется по формуле: ${col.formula || "SUM"}`,
+                }, val !== "" ? String(val) : "0");
+              }
+
+              const cell = el("td", {
+                class: "cell-score editable",
+                contenteditable: "true",
+                spellcheck: "false",
+                "data-col": col.key,
+                "data-user": row.userId,
+              }, val !== "" ? String(val) : "—");
+
+              let initVal = "";
+              cell.onfocus = () => {
+                initVal = cell.textContent.trim();
+                if (initVal === "—") cell.textContent = "";
+                cell.classList.add("editing");
+              };
+              cell.onkeydown = (e) => {
+                if (e.key === "Enter") { e.preventDefault(); cell.blur(); }
+                else if (e.key === "Escape") { cell.textContent = initVal; cell.blur(); }
+              };
+              cell.onblur = async () => {
+                cell.classList.remove("editing");
+                let text = cell.textContent.trim();
+                if (text === "" || text === "—") { text = "0"; cell.textContent = "—"; }
+                const scoreNum = parseFloat(text);
+                if (isNaN(scoreNum)) { cell.textContent = initVal; return; }
+                cell.textContent = scoreNum;
+                if (String(scoreNum) === initVal) return;
+
+                cell.classList.add("saving");
+                try {
+                  await json("/api/admin/grades", {
+                    method: "PUT",
+                    body: { user_id: row.userId, column_key: col.key, score: scoreNum },
+                  });
+                  cell.classList.remove("saving");
+                  cell.classList.add("saved");
+                  setTimeout(() => cell.classList.remove("saved"), 800);
+                  // Recalculate row total in DOM
+                  let total = 0;
+                  const tr = cell.closest("tr");
+                  tr.querySelectorAll(".cell-score:not(.cell-calculated)").forEach((c) => {
+                    const v = parseFloat(c.textContent.trim());
+                    if (!isNaN(v)) total += v;
+                  });
+                  const totEl = tr.querySelector(".cell-total");
+                  if (totEl) totEl.innerHTML = `<strong>${total}</strong>`;
+                } catch {
+                  cell.classList.remove("saving");
+                  cell.classList.add("error");
+                }
+              };
+
+              return cell;
+            }),
+            el("td", { class: "cell-total" }, el("strong", {}, row.total))
+          );
+        })
+      )
+    );
+
+    container.replaceChildren(
+      el("div", { class: "admin-section" },
+        el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;" },
+          el("div", {},
+            el("h2", { style: "margin: 0; font-size: 1.25rem;" }, "📊 Электронный журнал успеваемости потока"),
+            el("p", { class: "muted", style: "font-size: 0.82rem; margin: 0.2rem 0 0;" }, "Поддержка вычисляемых формул (SUM, AVG), редактирования колонок и Google Sheets таблицы")
+          ),
+          el("div", { style: "display: flex; align-items: center; gap: 0.75rem;" },
+            addColBtn,
+            el("span", { class: "badge badge-warning", style: "font-size: 0.78rem;" }, "Клик по ячейке для ввода балла (автосохранение onBlur)")
+          )
+        ),
+        groupTabs,
+        el("div", { class: "grades-sheet-wrapper", style: "max-height: 75vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm);" }, table)
+      )
+    );
+  }
+
+  render();
+}
+
+function openAddColumnModal(onSave) {
+  const dlg = el("dialog", { class: "auth-modal-dialog" });
+  document.body.append(dlg);
+
+  const titleInput = el("input", { type: "text", class: "form-input", placeholder: "Контрольная 2 или Лаб. 3", required: true });
+  const keyInput = el("input", { type: "text", class: "form-input", placeholder: "kr_2 или lab_3", required: true });
+  const maxScoreInput = el("input", { type: "number", class: "form-input", value: 10, min: 1, max: 100 });
+  const isCalcSelect = el("select", { class: "form-input" },
+    el("option", { value: "0" }, "Обычный числовой столбец"),
+    el("option", { value: "1" }, "Вычисляемый столбец (формула)")
+  );
+  const formulaInput = el("input", { type: "text", class: "form-input", placeholder: "SUM или SUM(kr_1, kr_2) или AVG(hw_1, hw_2)", value: "SUM" });
+  const formulaGroup = el("div", { class: "form-group", style: "display: none;" },
+    el("label", { class: "form-label" }, "Формула расчета"),
+    formulaInput,
+    el("p", { class: "form-help", style: "font-size: 0.78rem; color: var(--muted); margin: 0.2rem 0 0;" }, "Доступно: SUM (все баллы), AVG (среднее), SUM(c1, c2), AVG(c1, c2)")
+  );
+
+  titleInput.oninput = () => {
+    if (!keyInput.dataset.touched) {
+      const translit = titleInput.value.toLowerCase().replace(/[^a-z0-9а-яё]+/g, "_").slice(0, 15);
+      keyInput.value = translit;
+    }
+  };
+  keyInput.onfocus = () => { keyInput.dataset.touched = "true"; };
+
+  isCalcSelect.onchange = () => {
+    formulaGroup.style.display = isCalcSelect.value === "1" ? "block" : "none";
+  };
+
+  const form = el("form", {},
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Название столбца"), titleInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Идентификатор (ключ, англ.)"), keyInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Максимальный балл"), maxScoreInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Тип столбца"), isCalcSelect),
+    formulaGroup,
+    el("div", { style: "display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem;" },
+      el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => { dlg.close(); dlg.remove(); } }, "Отмена"),
+      el("button", { class: "btn primary btn-sm", type: "submit" }, "Создать столбец")
+    )
+  );
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const isCalc = isCalcSelect.value === "1";
+    const payload = {
+      key: keyInput.value.trim(),
+      title: titleInput.value.trim(),
+      max_score: parseFloat(maxScoreInput.value) || 10,
+      is_calculated: isCalc ? 1 : 0,
+      formula: isCalc ? formulaInput.value.trim() : "",
+    };
+
+    try {
+      await json("/api/admin/gradebook/columns", { method: "POST", body: payload });
+      dlg.close();
+      dlg.remove();
+      if (onSave) onSave();
+    } catch (err) {
+      alert("Ошибка создания столбца: " + err.message);
+    }
+  };
+
+  const box = el("div", { class: "auth-modal-box", style: "max-width: 500px;" },
+    el("h3", { class: "auth-modal-title", style: "margin-bottom: 1rem;" }, "➕ Новый столбец журнала"),
+    form
+  );
+
+  dlg.replaceChildren(box);
+  dlg.showModal();
+}
+
+function openEditColumnModal(col, onSave) {
+  const dlg = el("dialog", { class: "auth-modal-dialog" });
+  document.body.append(dlg);
+
+  const keyInput = el("input", { type: "text", class: "form-input", value: col.key, readonly: true, style: "opacity: 0.7;" });
+  const titleInput = el("input", { type: "text", class: "form-input", value: col.title, required: true });
+  const maxScoreInput = el("input", { type: "number", class: "form-input", value: col.max, min: 1, max: 100 });
+  const isCalcSelect = el("select", { class: "form-input" },
+    el("option", { value: "0", selected: !col.is_calculated }, "Обычный числовой столбец"),
+    el("option", { value: "1", selected: col.is_calculated }, "Вычисляемый столбец (формула)")
+  );
+  const formulaInput = el("input", { type: "text", class: "form-input", placeholder: "SUM, AVG, SUM(c1, c2)", value: col.formula || "SUM" });
+  const formulaGroup = el("div", { class: "form-group", style: col.is_calculated ? "display: block;" : "display: none;" },
+    el("label", { class: "form-label" }, "Формула расчета"),
+    formulaInput,
+    el("p", { class: "form-help", style: "font-size: 0.78rem; color: var(--muted); margin: 0.2rem 0 0;" }, "Форматы: SUM (все баллы), AVG (среднее), SUM(kr_1, kr_2), AVG(hw_1, hw_2)")
+  );
+
+  isCalcSelect.onchange = () => {
+    formulaGroup.style.display = isCalcSelect.value === "1" ? "block" : "none";
+  };
+
+  const deleteBtn = el("button", {
+    class: "btn danger btn-sm",
+    type: "button",
+    onclick: async () => {
+      if (!confirm(`Удалить столбец «${col.title}» (${col.key}) из журнала оценок? Все выставленные баллы по нему сохранятся в архиве.`)) return;
+      try {
+        await json(`/api/admin/gradebook/columns/${encodeURIComponent(col.id || col.key)}`, { method: "DELETE" });
+        dlg.close();
+        dlg.remove();
+        if (onSave) onSave();
+      } catch (err) {
+        alert("Ошибка удаления столбца: " + err.message);
+      }
+    },
+  }, "🗑️ Удалить столбец");
+
+  const form = el("form", {},
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Ключ (ID столбца)"), keyInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Название столбца"), titleInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Максимальный балл"), maxScoreInput),
+    el("div", { class: "form-group" }, el("label", { class: "form-label" }, "Тип столбца"), isCalcSelect),
+    formulaGroup,
+    el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem;" },
+      deleteBtn,
+      el("div", { style: "display: flex; gap: 0.5rem;" },
+        el("button", { class: "btn quiet btn-sm", type: "button", onclick: () => { dlg.close(); dlg.remove(); } }, "Отмена"),
+        el("button", { class: "btn primary btn-sm", type: "submit" }, "Сохранить")
+      )
+    )
+  );
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const isCalc = isCalcSelect.value === "1";
+    const payload = {
+      title: titleInput.value.trim(),
+      max_score: parseFloat(maxScoreInput.value) || 10,
+      is_calculated: isCalc ? 1 : 0,
+      formula: isCalc ? formulaInput.value.trim() : "",
+    };
+
+    try {
+      await json(`/api/admin/gradebook/columns/${encodeURIComponent(col.id || col.key)}`, { method: "PUT", body: payload });
+      dlg.close();
+      dlg.remove();
+      if (onSave) onSave();
+    } catch (err) {
+      alert("Ошибка сохранения столбца: " + err.message);
+    }
+  };
+
+  const box = el("div", { class: "auth-modal-box", style: "max-width: 500px;" },
+    el("h3", { class: "auth-modal-title", style: "margin-bottom: 1rem;" }, `⚙️ Настройки столбца «${col.title}»`),
+    form
+  );
+
+  dlg.replaceChildren(box);
+  dlg.showModal();
+}
+
+
 
 
 

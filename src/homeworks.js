@@ -15,9 +15,19 @@ class HomeworksApp {
   }
 
   async init() {
+    this.currentUser = window.dmUser || null;
+    if (!this.currentUser) {
+      try {
+        const cached = sessionStorage.getItem("dm_cached_user");
+        if (cached) this.currentUser = JSON.parse(cached);
+      } catch {}
+    }
+
     const savedGroup = localStorage.getItem("dm_user_group");
     if (savedGroup) {
       this.selectedGroup = savedGroup;
+    } else if (this.currentUser?.group_name) {
+      this.selectedGroup = this.currentUser.group_name;
     }
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -26,8 +36,18 @@ class HomeworksApp {
       this.selectedId = paramId;
     }
 
-    await this.checkAuthAndFetch();
+    try {
+      const cachedHw = sessionStorage.getItem("dm_cached_homeworks");
+      if (cachedHw) {
+        const parsed = JSON.parse(cachedHw);
+        if (Array.isArray(parsed) && parsed.length > 0) this.homeworks = parsed;
+      }
+    } catch {}
+
     this.bindEvents();
+    this.render();
+
+    await this.checkAuthAndFetch();
     this.render();
   }
 
@@ -36,30 +56,39 @@ class HomeworksApp {
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     try {
-      const sessRes = await fetch("/api/auth/session", { headers, credentials: "same-origin" });
-      if (sessRes.ok) {
+      const [sessRes, hwRes] = await Promise.all([
+        fetch("/api/auth/session", { headers, credentials: "same-origin" }).catch(() => null),
+        fetch("/api/homeworks", { headers, credentials: "same-origin" }).catch(() => null),
+      ]);
+
+      if (sessRes && sessRes.ok) {
         const sessData = await sessRes.json();
         if (sessData.authenticated && sessData.user) {
           this.currentUser = sessData.user;
-          if (this.currentUser.group_name && !this.selectedGroup) {
+          if (this.currentUser.group_name && (!this.selectedGroup || this.selectedGroup === "all")) {
             this.selectedGroup = this.currentUser.group_name;
           }
+        } else {
+          this.currentUser = null;
         }
       }
-    } catch {}
 
-    try {
-      const hwRes = await fetch("/api/homeworks", { headers, credentials: "same-origin" });
-      if (hwRes.ok) {
+      if (hwRes && hwRes.ok) {
         const hwData = await hwRes.json();
         if (Array.isArray(hwData.homeworks) && hwData.homeworks.length > 0) {
           this.homeworks = hwData.homeworks;
+          try { sessionStorage.setItem("dm_cached_homeworks", JSON.stringify(this.homeworks)); } catch {}
         }
       }
     } catch {}
   }
 
   bindEvents() {
+    window.addEventListener("dm:auth-updated", (e) => {
+      this.currentUser = e.detail || null;
+      this.render();
+    });
+
     const groupSelect = document.getElementById("homework-group-select");
     if (groupSelect) {
       if (Array.from(groupSelect.options).some((o) => o.value === this.selectedGroup)) {
@@ -82,9 +111,15 @@ class HomeworksApp {
     const mobileBtn = document.getElementById("homeworks-menu-btn");
     const sidebar = document.getElementById("homeworks-sidebar");
     if (mobileBtn && sidebar) {
-      mobileBtn.onclick = () => {
+      mobileBtn.onclick = (e) => {
+        e.stopPropagation();
         sidebar.classList.toggle("open");
       };
+      document.addEventListener("click", (e) => {
+        if (sidebar.classList.contains("open") && !sidebar.contains(e.target) && !mobileBtn.contains(e.target)) {
+          sidebar.classList.remove("open");
+        }
+      });
     }
   }
 

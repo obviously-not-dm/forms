@@ -4,14 +4,24 @@
 class DMPlatform {
   constructor() {
     this.user = null;
+    try {
+      const cached = sessionStorage.getItem("dm_cached_user");
+      if (cached) {
+        this.user = JSON.parse(cached);
+        window.dmUser = this.user;
+      }
+    } catch {}
     this.init();
   }
 
   async init() {
-    await this.checkAuth();
+    // Bind interactive UI immediately (0ms delay on mobile/slow networks)
     this.initNavbar();
-    this.initAuthModal();
     this.initMobileBurger();
+    this.initAuthModal();
+    this.initFeedbackModal();
+
+    await this.checkAuth();
 
     // Page-specific modules
     if (document.getElementById("leaderboard-table")) {
@@ -51,13 +61,14 @@ class DMPlatform {
         const data = await res.json();
         if (data.authenticated && data.user) {
           this.user = data.user;
+          try { sessionStorage.setItem("dm_cached_user", JSON.stringify(this.user)); } catch {}
         } else {
           this.user = null;
+          try { sessionStorage.removeItem("dm_cached_user"); } catch {}
         }
       }
     } catch (e) {
       console.warn("Auth check failed:", e);
-      this.user = null;
     }
     window.dmUser = this.user;
     this.renderNavbarAuth();
@@ -118,6 +129,7 @@ class DMPlatform {
           await fetch("/api/auth/logout", { method: "POST", headers, credentials: "same-origin" });
         } catch {}
         localStorage.removeItem("dm_admin_token");
+        try { sessionStorage.removeItem("dm_cached_user"); } catch {}
         window.location.reload();
       };
     }
@@ -126,22 +138,54 @@ class DMPlatform {
   initMobileBurger() {
     const burger = document.getElementById("platform-burger");
     const nav = document.getElementById("platform-nav");
-    if (burger && nav) {
-      burger.onclick = (e) => {
+    const closeBtn = document.getElementById("platform-nav-close");
+    const backdrop = document.getElementById("platform-nav-backdrop");
+
+    if (!burger || !nav) return;
+
+    const setOpen = (isOpen) => {
+      nav.classList.toggle("open", isOpen);
+      burger.classList.toggle("is-active", isOpen);
+      burger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      if (backdrop) {
+        backdrop.hidden = !isOpen;
+        backdrop.classList.toggle("open", isOpen);
+      }
+    };
+
+    burger.onclick = (e) => {
+      e.stopPropagation();
+      setOpen(!nav.classList.contains("open"));
+    };
+
+    if (closeBtn) {
+      closeBtn.onclick = (e) => {
         e.stopPropagation();
-        nav.classList.toggle("open");
+        setOpen(false);
       };
-      document.addEventListener("click", (e) => {
-        if (!nav.contains(e.target) && e.target !== burger) {
-          nav.classList.remove("open");
-        }
-      });
-      nav.querySelectorAll(".nav-item").forEach((link) => {
-        link.addEventListener("click", () => {
-          nav.classList.remove("open");
-        });
-      });
     }
+
+    if (backdrop) {
+      backdrop.onclick = () => setOpen(false);
+    }
+
+    document.addEventListener("click", (e) => {
+      if (nav.classList.contains("open") && !nav.contains(e.target) && !burger.contains(e.target)) {
+        setOpen(false);
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && nav.classList.contains("open")) {
+        setOpen(false);
+      }
+    });
+
+    nav.querySelectorAll(".nav-item").forEach((link) => {
+      link.addEventListener("click", () => {
+        setOpen(false);
+      });
+    });
   }
 
   // ==========================================
@@ -447,6 +491,122 @@ class DMPlatform {
     if (regForm) regForm.hidden = tab !== "register";
     if (resetForm) resetForm.hidden = tab !== "reset";
     if (teacherForm) teacherForm.hidden = tab !== "teacher";
+  }
+
+  initFeedbackModal() {
+    const modal = document.getElementById("feedback-modal");
+    const closeBtn = document.getElementById("btn-feedback-close");
+    const form = document.getElementById("feedback-form");
+    if (!modal) return;
+
+    const openFeedback = () => {
+      // Close navigation drawer if open
+      const nav = document.getElementById("platform-nav");
+      const burger = document.getElementById("platform-burger");
+      const backdrop = document.getElementById("platform-nav-backdrop");
+      if (nav) nav.classList.remove("open");
+      if (burger) {
+        burger.classList.remove("is-active");
+        burger.setAttribute("aria-expanded", "false");
+      }
+      if (backdrop) {
+        backdrop.hidden = true;
+        backdrop.classList.remove("open");
+      }
+
+      const anonFields = document.getElementById("fb-anon-fields");
+      if (anonFields) {
+        anonFields.style.display = this.user ? "none" : "";
+      }
+      const errEl = document.getElementById("fb-error");
+      const succEl = document.getElementById("fb-success");
+      if (errEl) errEl.hidden = true;
+      if (succEl) succEl.hidden = true;
+
+      if (typeof modal.showModal === "function") {
+        if (!modal.open) modal.showModal();
+      } else {
+        modal.setAttribute("open", "");
+      }
+    };
+
+    const closeFeedback = () => {
+      if (typeof modal.close === "function" && modal.open) {
+        modal.close();
+      } else {
+        modal.removeAttribute("open");
+      }
+    };
+
+    document.querySelectorAll("#btn-floating-feedback, [data-open-feedback]").forEach((trigger) => {
+      trigger.onclick = (e) => {
+        e.preventDefault();
+        openFeedback();
+      };
+    });
+
+    if (closeBtn) {
+      closeBtn.onclick = () => closeFeedback();
+    }
+
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeFeedback();
+    });
+
+    if (form) {
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const type = document.getElementById("fb-type")?.value || "general";
+        const name = document.getElementById("fb-name")?.value || (this.user?.name || "");
+        const message = document.getElementById("fb-message")?.value || "";
+        const errEl = document.getElementById("fb-error");
+        const succEl = document.getElementById("fb-success");
+        const submitBtn = document.getElementById("btn-fb-submit");
+
+        if (errEl) errEl.hidden = true;
+        if (succEl) succEl.hidden = true;
+
+        if (!message.trim()) {
+          if (errEl) { errEl.textContent = "Пожалуйста, введите текст сообщения"; errEl.hidden = false; }
+          return;
+        }
+
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+          const headers = { "Content-Type": "application/json" };
+          const adminToken = localStorage.getItem("dm_admin_token");
+          if (adminToken) headers["Authorization"] = `Bearer ${adminToken}`;
+          const res = await fetch("/api/feedback", {
+            method: "POST",
+            headers,
+            credentials: "same-origin",
+            body: JSON.stringify({ type, name, message }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            if (succEl) succEl.hidden = false;
+            form.reset();
+            setTimeout(() => {
+              closeFeedback();
+              if (succEl) succEl.hidden = true;
+            }, 1400);
+          } else {
+            if (errEl) {
+              errEl.textContent = data.error || "Ошибка отправки отзыва";
+              errEl.hidden = false;
+            }
+          }
+        } catch {
+          if (errEl) {
+            errEl.textContent = "Ошибка сети при отправке";
+            errEl.hidden = false;
+          }
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
+        }
+      };
+    }
   }
 
   // ==========================================

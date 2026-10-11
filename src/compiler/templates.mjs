@@ -26,6 +26,23 @@ ${extra}</head>`;
 }
 
 export function navbarHtml(rel = "", activeTab = "", site = {}) {
+  const tabLabels = {
+    home: "Главная",
+    contests: "Контесты",
+    tests: "Тренажёры",
+    typoviks: "Типовые расчеты",
+    schedule: "Расписание",
+    grades: "Журнал",
+    requests: "Заявки",
+    practices: "Практики",
+    homeworks: "ДЗ",
+    notes: "Конспекты",
+    colloquiums: "Коллоквиумы",
+    leaderboard: "Рейтинг",
+    profile: "Профиль",
+  };
+  const currentTitle = tabLabels[activeTab] || "Платформа";
+
   return `
 <header class="topbar platform-topbar">
   <div class="topbar-inner">
@@ -42,26 +59,42 @@ export function navbarHtml(rel = "", activeTab = "", site = {}) {
           <span class="logo-sub">Дискретная математика</span>
         </div>
       </a>
+      <span class="topbar-current-pill">${currentTitle}</span>
     </div>
 
-    <nav class="topbar-nav" id="platform-nav">
-      <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">Главная</a>
-      <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">Контесты</a>
-      <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}tests/">Тренажёры</a>
-      <a class="nav-item ${activeTab === 'practices' ? 'active' : ''}" href="${rel}practices/">Практики</a>
-      <a class="nav-item ${activeTab === 'homeworks' ? 'active' : ''}" href="${rel}homeworks/">ДЗ</a>
-      <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">Конспекты</a>
-      <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">Коллоквиумы</a>
-      <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">Рейтинг</a>
+    <div class="topbar-right-actions">
+      <div class="topbar-auth" id="topbar-auth-slot">
+        <button type="button" class="btn quiet btn-sm btn-auth-open" id="btn-auth-open">Вход</button>
+      </div>
+
+      <button type="button" class="btn quiet btn-sm platform-burger" id="platform-burger" aria-label="Меню разделов" aria-expanded="false">
+        <span class="burger-icon" aria-hidden="true">☰</span>
+        <span class="burger-label">Разделы</span>
+      </button>
+    </div>
+
+    <div class="topbar-nav-backdrop" id="platform-nav-backdrop" hidden></div>
+
+    <nav class="topbar-nav" id="platform-nav" aria-label="Разделы платформы">
+      <div class="topbar-nav-header">
+        <span class="topbar-nav-title">Разделы платформы</span>
+        <button type="button" class="btn quiet btn-xs topbar-nav-close" id="platform-nav-close" aria-label="Закрыть меню">✕</button>
+      </div>
+      <div class="topbar-nav-grid">
+        <a class="nav-item ${activeTab === 'home' ? 'active' : ''}" href="${rel}">🏠 Главная</a>
+        <a class="nav-item ${activeTab === 'contests' ? 'active' : ''}" href="${rel}contests/">⚡ Контесты</a>
+        <a class="nav-item ${activeTab === 'tests' ? 'active' : ''}" href="${rel}tests/">🧪 Тренажёры</a>
+        <a class="nav-item ${activeTab === 'typoviks' ? 'active' : ''}" href="${rel}typoviks/">📐 Типовые расчеты</a>
+        <a class="nav-item ${activeTab === 'homeworks' ? 'active' : ''}" href="${rel}homeworks/">📝 Домашние задания</a>
+        <a class="nav-item ${activeTab === 'practices' ? 'active' : ''}" href="${rel}practices/">🎯 Практики</a>
+        <a class="nav-item ${activeTab === 'notes' ? 'active' : ''}" href="${rel}notes/">📚 Конспекты</a>
+        <a class="nav-item ${activeTab === 'colloquiums' ? 'active' : ''}" href="${rel}colloquiums/">🗂️ Коллоквиумы</a>
+        <a class="nav-item ${activeTab === 'schedule' ? 'active' : ''}" href="${rel}schedule/">📅 Расписание</a>
+        <a class="nav-item ${activeTab === 'grades' ? 'active' : ''}" href="${rel}grades/">📊 Журнал баллов</a>
+        <a class="nav-item ${activeTab === 'requests' ? 'active' : ''}" href="${rel}requests/">🙋 Заявки</a>
+        <a class="nav-item ${activeTab === 'leaderboard' ? 'active' : ''}" href="${rel}leaderboard/">🏆 Рейтинг</a>
+      </div>
     </nav>
-
-    <div class="topbar-auth" id="topbar-auth-slot">
-      <button type="button" class="btn quiet btn-sm btn-auth-open" id="btn-auth-open">Вход</button>
-    </div>
-
-    <button type="button" class="btn quiet btn-sm platform-burger" id="platform-burger" aria-label="Меню">
-      ☰
-    </button>
   </div>
 </header>`;
 }
@@ -153,6 +186,45 @@ export function authModalHtml(site = {}) {
         </div>
         <div class="form-error" id="reg-error" hidden></div>
         <button type="submit" class="btn primary btn-block" id="btn-register-submit">Зарегистрироваться</button>
+      </form>
+    </div>
+  </div>
+</dialog>
+
+<!-- Floating Feedback Button & Dialog -->
+<button type="button" class="floating-feedback-btn" id="btn-floating-feedback" data-open-feedback title="Оставить отзыв или сообщить об ошибке">
+  <span class="feedback-icon" aria-hidden="true">💬</span>
+  <span class="feedback-label">Обратная связь</span>
+</button>
+
+<dialog id="feedback-modal" class="auth-modal-dialog">
+  <div class="auth-modal-box">
+    <button type="button" class="btn quiet btn-sm auth-close-btn" id="btn-feedback-close" aria-label="Закрыть">✕</button>
+    <div class="auth-modal-header">
+      <h3 class="auth-modal-title">Обратная связь</h3>
+      <p style="font-size: 0.85rem; color: var(--muted); margin: 0.25rem 0 0;">Сообщите об ошибке, задайте вопрос или предложите новую функциональность для ITMO.DM.</p>
+    </div>
+    <div class="auth-modal-body">
+      <form id="feedback-form">
+        <div class="form-group">
+          <label class="form-label" for="fb-type">Тип обращения</label>
+          <select id="fb-type" class="form-input">
+            <option value="general">Общий отзыв / Впечатления</option>
+            <option value="bug">Сообщение об ошибке (Баг)</option>
+            <option value="feature">Предложение функциональности</option>
+          </select>
+        </div>
+        <div class="form-group" id="fb-anon-fields">
+          <label class="form-label" for="fb-name">Имя (необязательно)</label>
+          <input type="text" id="fb-name" class="form-input" placeholder="Иван Иванов">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="fb-message">Текст сообщения</label>
+          <textarea id="fb-message" class="form-input" rows="4" placeholder="Опишите подробно проблему или ваше предложение..." required style="resize: vertical; min-height: 90px;"></textarea>
+        </div>
+        <div class="form-error" id="fb-error" hidden></div>
+        <div class="form-success" id="fb-success" style="color: var(--ok); font-size: 0.88rem; margin: 0.35rem 0;" hidden>Спасибо! Ваше сообщение принято и передано преподавателям.</div>
+        <button type="submit" class="btn primary btn-block" id="btn-fb-submit">Отправить отзыв</button>
       </form>
     </div>
   </div>
@@ -1355,4 +1427,267 @@ export function homeworksPage(homeworks = [], site = {}) {
 </html>
 `;
 }
+
+export function typoviksPage(site = {}) {
+  const groupOptions = ["all", ...(site.groups || ["M3101", "M3102", "M3103", "M3111", "M3112", "M3113", "M3114", "M3115"])]
+    .map((g) => `<option value="${esc(g)}">${g === "all" ? "Все группы" : esc(g)}</option>`)
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Типовые расчеты — Дискретная математика</title>
+  <link rel="stylesheet" href="../assets/katex/katex.min.css">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body class="homeworks-body-app platform-body typoviks-page">
+  ${navbarHtml("../", "typoviks", site)}
+
+  <div class="homeworks-subbar">
+    <div class="homeworks-subbar-title">
+      <span>Типовые расчеты</span>
+    </div>
+    <div class="homeworks-subbar-controls">
+      <div class="group-filter-wrap">
+        <label for="typovik-group-select" class="group-filter-label">Группа:</label>
+        <select id="typovik-group-select" class="form-select form-select-sm">
+          ${groupOptions}
+        </select>
+      </div>
+      <button type="button" class="btn quiet btn-sm homeworks-mobile-menu-btn" id="typoviks-menu-btn" aria-label="Открыть список">
+        ☰ Расчеты
+      </button>
+    </div>
+  </div>
+
+  <div class="homeworks-layout">
+    <aside class="homeworks-sidebar" id="typoviks-sidebar" aria-label="Список типовых расчетов">
+      <div class="homeworks-sidebar-header">
+        <input type="search" id="typoviks-search" class="notes-search-input" placeholder="Поиск по типовым расчетам..." autocomplete="off">
+      </div>
+      <div class="homeworks-cards-list" id="typoviks-cards-list">
+        <p class="muted" style="padding: 1rem;">Загрузка списка типовых расчетов…</p>
+      </div>
+    </aside>
+
+    <main class="homeworks-content">
+      <div class="homeworks-detail-sheet" id="typovik-detail-sheet">
+        <div style="padding: 2.5rem; text-align: center; color: var(--muted);">
+          Выберите типовой расчет из списка слева, чтобы открыть свой персональный вариант.
+        </div>
+      </div>
+    </main>
+  </div>
+
+  ${authModalHtml(site)}
+  <script src="../assets/katex/katex.min.js"></script>
+  <script src="../assets/katex/auto-render.min.js"></script>
+  <script src="../assets/marked.min.js"></script>
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/typoviks.js"></script>
+</body>
+</html>
+`;
+}
+
+export function schedulePage(site = {}) {
+  const groupOptions = ["all", ...(site.groups || ["M3101", "M3102", "M3103", "M3111", "M3112", "M3113", "M3114", "M3115"])]
+    .map((g) => `<option value="${esc(g)}">${g === "all" ? "Все группы" : esc(g)}</option>`)
+    .join("\n");
+
+  return `${head("Расписание занятий и консультаций — Дискретная математика", "../")}
+<body class="platform-body schedule-page-body">
+  ${navbarHtml("../", "schedule", site)}
+
+  <main class="platform-container">
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <h1 class="page-title">Расписание курса</h1>
+        <p class="page-subtitle">Лекции, практики, доп. консультации и онлайн-мероприятия по дискретной математике.</p>
+      </div>
+    </div>
+
+    <!-- Calendar Controls Toolbar -->
+    <div class="schedule-toolbar">
+      <div class="schedule-view-toggles" role="tablist">
+        <button type="button" class="btn btn-sm schedule-view-btn active" data-view="week" role="tab">Сетка недели</button>
+        <button type="button" class="btn btn-sm quiet schedule-view-btn" data-view="month" role="tab">Сетка месяца</button>
+        <button type="button" class="btn btn-sm quiet schedule-view-btn" data-view="list" role="tab">Список событий</button>
+      </div>
+
+      <div class="schedule-nav-controls">
+        <button type="button" class="btn quiet btn-sm" id="btn-sched-prev" title="Назад">‹</button>
+        <span class="schedule-current-period" id="sched-current-period">Октябрь 2026</span>
+        <button type="button" class="btn quiet btn-sm" id="btn-sched-next" title="Вперёд">›</button>
+        <button type="button" class="btn quiet btn-sm" id="btn-sched-today">Сегодня</button>
+      </div>
+
+      <div class="schedule-filters">
+        <div class="filter-item">
+          <label for="sched-filter-group" class="filter-label">Группа:</label>
+          <select id="sched-filter-group" class="form-select form-select-sm">
+            ${groupOptions}
+          </select>
+        </div>
+        <div class="filter-item">
+          <label for="sched-filter-teacher" class="filter-label">Преподаватель:</label>
+          <input type="text" id="sched-filter-teacher" class="form-input form-input-sm" placeholder="Все преподаватели...">
+        </div>
+      </div>
+    </div>
+
+    <!-- Calendar Viewport -->
+    <div class="schedule-calendar-card">
+      <div id="schedule-viewport" class="schedule-viewport">
+        <p class="table-loading">Загружаем события расписания…</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Event Detail Dialog -->
+  <dialog id="event-detail-modal" class="auth-modal-dialog">
+    <div class="auth-modal-box">
+      <button type="button" class="btn quiet btn-sm auth-close-btn" data-close aria-label="Закрыть">✕</button>
+      <div class="auth-modal-header">
+        <span class="badge" id="modal-ev-type" style="margin-bottom: 0.35rem; display: inline-block;">Лекция</span>
+        <h3 class="auth-modal-title" id="modal-ev-title">Событие</h3>
+      </div>
+      <div class="auth-modal-body" id="modal-ev-body"></div>
+    </div>
+  </dialog>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/schedule.js"></script>
+</body>
+</html>
+`;
+}
+
+export function gradesPage(site = {}) {
+  const groups = ["all", ...(site.groups || ["M3101", "M3102", "M3103", "M3111", "M3112", "M3113", "M3114", "M3115"])];
+  const groupTabs = groups.map((g, idx) => `
+    <button type="button" class="grades-group-tab ${idx === 0 ? "active" : ""}" data-group="${esc(g)}">
+      ${g === "all" ? "Весь поток" : esc(g)}
+    </button>
+  `).join("\n");
+
+  return `${head("Журнал баллов — Дискретная математика", "../")}
+<body class="platform-body grades-page-body">
+  ${navbarHtml("../", "grades", site)}
+
+  <main class="platform-container">
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <h1 class="page-title">Электронный журнал баллов</h1>
+        <p class="page-subtitle">Сводная таблица успеваемости (тесты, домашние задания, типовики, коллоквиумы и экзамен).</p>
+      </div>
+      <div class="page-header-actions" id="teacher-edit-notice" hidden>
+        <span class="badge badge-warning" style="font-size: 0.82rem; padding: 0.35rem 0.65rem;">
+          Режим редактирования преподавателя (кликните по ячейке для ввода балла)
+        </span>
+      </div>
+    </div>
+
+    <!-- Sheet Group Tabs & Search -->
+    <div class="grades-toolbar">
+      <div class="grades-tabs-scroll" id="grades-group-tabs">
+        ${groupTabs}
+      </div>
+      <div class="grades-search-wrap">
+        <input type="search" id="grades-search-input" class="form-input form-input-sm" placeholder="Поиск по ФИО студента...">
+      </div>
+    </div>
+
+    <!-- Spreadsheet Grid -->
+    <div class="grades-sheet-wrapper">
+      <div class="grades-table-scroll" id="grades-table-container">
+        <p class="table-loading">Загружаем ведомость успеваемости…</p>
+      </div>
+    </div>
+  </main>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/grades.js"></script>
+</body>
+</html>
+`;
+}
+
+export function requestsPage(site = {}) {
+  return `${head("Заявки на консультации — Дискретная математика", "../")}
+<body class="platform-body requests-page-body">
+  ${navbarHtml("../", "requests", site)}
+
+  <main class="platform-container">
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <h1 class="page-title">Заявки на консультации и доп. лекции</h1>
+        <p class="page-subtitle">Студенты могут отправить запрос преподавателям на разбор сложных тем или проведение консультаций.</p>
+      </div>
+    </div>
+
+    <div class="requests-grid-layout">
+      <!-- Create Request Form -->
+      <section class="card request-form-card">
+        <div class="card-header">
+          <h2 class="card-title">Подать заявку</h2>
+        </div>
+        <div class="card-body">
+          <div id="request-auth-warn" class="auth-callout-banner" style="background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 1rem; font-size: 0.85rem;" hidden>
+            Для подачи заявки необходимо <a href="#" onclick="document.getElementById('btn-auth-open')?.click(); return false;" style="color: var(--accent-ink); text-decoration: underline; font-weight: 600;">войти в аккаунт</a>.
+          </div>
+
+          <form id="consult-request-form">
+            <div class="form-group">
+              <label class="form-label" for="req-type">Тип мероприятия</label>
+              <select id="req-type" class="form-input">
+                <option value="consultation">Индивидуальная / групповая консультация</option>
+                <option value="extra_lecture">Дополнительная лекция для группы</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="req-topic">Тема / Раздел курса *</label>
+              <input type="text" id="req-topic" class="form-input" placeholder="Например: Замкнутые классы Поста или Алгоритм Краскала" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="req-time">Предпочтительное время / слот *</label>
+              <input type="text" id="req-time" class="form-input" placeholder="Например: Вторник после 17:00 или Суббота Zoom" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="req-comment">Комментарий к заявке (какие задачи разобрать)</label>
+              <textarea id="req-comment" class="form-input" rows="3" placeholder="Укажите конкретные номера задач или теоретические вопросы..." style="resize: vertical;"></textarea>
+            </div>
+            <div class="form-error" id="req-error" hidden></div>
+            <div class="form-success" id="req-success" style="color: var(--ok); font-size: 0.88rem; margin: 0.35rem 0;" hidden>Заявка успешно отправлена! Преподаватель рассмотрит её в ближайшее время.</div>
+            <button type="submit" class="btn primary btn-block" id="btn-submit-request">Отправить заявку</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- Student's Existing Requests -->
+      <section class="card requests-history-card">
+        <div class="card-header">
+          <h2 class="card-title">История ваших заявок</h2>
+        </div>
+        <div class="card-body">
+          <div id="requests-history-list">
+            <p class="muted">Загружаем ваши заявки…</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  ${authModalHtml(site)}
+  <script type="module" src="../js/platform.js"></script>
+  <script type="module" src="../js/requests.js"></script>
+</body>
+</html>
+`;
+}
+
 

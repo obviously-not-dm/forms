@@ -55,6 +55,39 @@ import {
   getHomeworkSubmissions,
   getAllHomeworkSubmissions,
   reviewHomeworkSubmission,
+  saveFeedback,
+  getFeedbackById,
+  getAllFeedback,
+  updateFeedbackStatus,
+  createConsultationRequest,
+  getConsultationRequestById,
+  getUserConsultationRequests,
+  getAllConsultationRequests,
+  reviewConsultationRequest,
+  saveQuestionBankItem,
+  getQuestionBankItemById,
+  getAllQuestionBankItems,
+  deleteQuestionBankItem,
+  saveTypovik,
+  getTypovikById,
+  getAllTypoviks,
+  deleteTypovik,
+  generateTypovikVariants,
+  getTypovikVariant,
+  saveTypovikSubmission,
+  getTypovikSubmission,
+  getTypovikSubmissionById,
+  getTypovikSubmissions,
+  reviewTypovikSubmission,
+  saveScheduleEvent,
+  getScheduleEventById,
+  getAllScheduleEvents,
+  deleteScheduleEvent,
+  saveStudentGrade,
+  getGradesSpreadsheet,
+  getAllGradeColumns,
+  saveGradeColumn,
+  deleteGradeColumn,
 } from "./db.mjs";
 import { saveUploadedPdf, getPdfFilePath, isValidPdf, saveUploadedImage, getImageFilePath } from "./storage.mjs";
 import { serializeTest, parseTest, serializeNote, parseNote, build } from "../compiler/builder.mjs";
@@ -224,6 +257,33 @@ export function parseMultipartPdf(buffer, boundary) {
   return null;
 }
 
+export function parseMultipartFiles(buffer, boundary) {
+  const boundaryBuffer = Buffer.from(`--${boundary}`);
+  let start = buffer.indexOf(boundaryBuffer);
+  if (start === -1) return [];
+
+  const files = [];
+  while (start !== -1) {
+    const nextStart = buffer.indexOf(boundaryBuffer, start + boundaryBuffer.length);
+    const part = nextStart === -1 ? buffer.subarray(start) : buffer.subarray(start, nextStart);
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd !== -1) {
+      const headerStr = part.subarray(0, headerEnd).toString("utf8");
+      if (headerStr.includes('filename="') || headerStr.includes("filename*=")) {
+        const match = headerStr.match(/filename=["']?([^"';\r\n]+)["']?/i);
+        let filename = match ? match[1] : "file";
+        let fileContent = part.subarray(headerEnd + 4);
+        if (fileContent.length >= 2 && fileContent.subarray(fileContent.length - 2).toString() === "\r\n") {
+          fileContent = fileContent.subarray(0, fileContent.length - 2);
+        }
+        files.push({ filename, buffer: fileContent });
+      }
+    }
+    start = nextStart;
+  }
+  return files;
+}
+
 async function handleSaveTest(res, testId, body) {
   const existing = getTestById(testId);
   let rawMd = body.rawMd;
@@ -326,7 +386,8 @@ async function handleSaveNote(res, noteId, body) {
 
 export async function handleApi(req, res, pathname) {
   try {
-    const normPath = String(pathname || "").split("?")[0].replace(/\/+$/, "") || "/";
+    const url = new URL(req.url || pathname || "/", "http://localhost");
+    const normPath = String(pathname || url.pathname || "").split("?")[0].replace(/\/+$/, "") || "/";
     const method = String(req.method || "GET").toUpperCase();
 
     if (method === "OPTIONS") {
@@ -840,7 +901,7 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
     }
 
     // POST /api/attempts/feedback
-    if ((normPath === "/api/attempts/feedback" || normPath === "/api/feedback") && method === "POST") {
+    if (normPath === "/api/attempts/feedback" && method === "POST") {
       const body = await readBody(req);
       const sess = getSession(req);
       const userId = sess?.userId || body.user_id || null;
@@ -848,7 +909,7 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
         id: body.id || body.attempt_id,
         quiz_id: body.quiz_id || body.test_id,
         user_id: userId,
-        feedback: body.feedback,
+        feedback: body.feedback || body.message,
       });
       return sendJson(res, 200, { ok: true, feedback });
     }
@@ -1358,6 +1419,37 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
       return;
     }
 
+    const uploadImageMatch = normPath.match(/^\/api\/uploads\/images\/([^/?#]+)$/);
+    if (uploadImageMatch && method === "GET") {
+      const filename = decodeURIComponent(uploadImageMatch[1]).trim();
+      const filePath = getImageFilePath(filename);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return sendJson(res, 404, { error: "Изображение не найдено" });
+      }
+
+      const stat = fs.statSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+      };
+      res.writeHead(200, {
+        "Content-Type": mimeTypes[ext] || "application/octet-stream",
+        "Content-Length": stat.size,
+        "Access-Control-Allow-Origin": "*",
+      });
+      if (typeof res.on === "function" && typeof res.emit === "function") {
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        res.end(fs.readFileSync(filePath));
+      }
+      return;
+    }
+
     // ----------------------------------------------------
     // IMAGE UPLOADS FOR ADMIN EDITORS
     // ----------------------------------------------------
@@ -1409,6 +1501,477 @@ ${hidden ? "hidden: true\n" : ""}description: "${description}"
         res.end(fs.readFileSync(filePath));
       }
       return;
+    }
+
+    // ----------------------------------------------------
+    // 1. FEEDBACK API
+    // ----------------------------------------------------
+    if (normPath === "/api/feedback" && method === "POST") {
+      const body = await readBody(req);
+      const sess = getSession(req);
+
+      // Support legacy quiz attempt feedback sent to /api/feedback
+      if ((body.quiz_id || body.test_id || body.attempt_id) && body.feedback && !body.message) {
+        const userId = sess?.userId || body.user_id || null;
+        const attemptFb = saveAttemptFeedback({
+          id: body.id || body.attempt_id,
+          quiz_id: body.quiz_id || body.test_id,
+          user_id: userId,
+          feedback: body.feedback,
+        });
+        return sendJson(res, 200, { ok: true, feedback: attemptFb });
+      }
+
+      const messageText = String(body.message || body.feedback || "").trim();
+      if (!messageText) {
+        return sendJson(res, 400, { error: "Текст отзыва обязателен" });
+      }
+      const user_id = sess?.userId || sess?.userObj?.id || null;
+      const user_name = (body.name && String(body.name).trim()) || sess?.userObj?.name || sess?.user || "Аноним";
+      const user_email = (body.email && String(body.email).trim()) || sess?.userObj?.email || "";
+
+      const fb = saveFeedback({
+        user_id,
+        user_name,
+        user_email,
+        type: body.type || "general",
+        message: messageText,
+      });
+      return sendJson(res, 200, { ok: true, feedback: fb });
+    }
+
+    if (normPath === "/api/admin/feedback" && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Доступ запрещен" });
+      }
+      const statusParam = url.searchParams.get("status") || "all";
+      const list = getAllFeedback({ status: statusParam });
+      return sendJson(res, 200, { feedback: list });
+    }
+
+    const fbStatusMatch = normPath.match(/^\/api\/admin\/feedback\/([^/?#]+)$/);
+    if (fbStatusMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") {
+        return sendJson(res, 403, { error: "Доступ запрещен" });
+      }
+      const id = decodeURIComponent(fbStatusMatch[1]).trim();
+      const body = await readBody(req);
+      if (!body.status) {
+        return sendJson(res, 400, { error: "Статус обязателен" });
+      }
+      const updated = updateFeedbackStatus(id, body.status);
+      return sendJson(res, 200, { ok: true, feedback: updated });
+    }
+
+    // ----------------------------------------------------
+    // 2. CONSULTATION REQUESTS API
+    // ----------------------------------------------------
+    if (normPath === "/api/consultations/requests" && method === "POST") {
+      const sess = getSession(req);
+      if (!sess) return sendJson(res, 401, { error: "Необходима авторизация" });
+
+      const body = await readBody(req);
+      if (!body.topic || !String(body.topic).trim()) {
+        return sendJson(res, 400, { error: "Тема консультации/лекции обязательна" });
+      }
+
+      const reqObj = createConsultationRequest({
+        user_id: sess.userId || sess.userObj?.id,
+        user_name: sess.userObj?.name || sess.user,
+        user_email: sess.userObj?.email || "",
+        group_name: sess.userObj?.group_name || body.group_name || "",
+        topic: body.topic,
+        type: body.type || "consultation",
+        preferred_time: body.preferred_time || "",
+        comment: body.comment || "",
+      });
+      return sendJson(res, 200, { ok: true, request: reqObj });
+    }
+
+    if (normPath === "/api/consultations/my" && method === "GET") {
+      const sess = getSession(req);
+      if (!sess) return sendJson(res, 401, { error: "Необходима авторизация" });
+      const userId = sess.userId || sess.userObj?.id;
+      const list = getUserConsultationRequests(userId);
+      return sendJson(res, 200, { requests: list });
+    }
+
+    if (normPath === "/api/admin/consultations/requests" && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const statusParam = url.searchParams.get("status") || "all";
+      const list = getAllConsultationRequests({ status: statusParam });
+      return sendJson(res, 200, { requests: list });
+    }
+
+    const consultReviewMatch = normPath.match(/^\/api\/admin\/consultations\/requests\/([^/?#]+)$/);
+    if (consultReviewMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(consultReviewMatch[1]).trim();
+      const body = await readBody(req);
+      const updated = reviewConsultationRequest(id, {
+        status: body.status || "approved",
+        teacher_comment: body.teacher_comment || "",
+      });
+      return sendJson(res, 200, { ok: true, request: updated });
+    }
+
+    // ----------------------------------------------------
+    // 3. QUESTION BANK & TYPOVIKI API
+    // ----------------------------------------------------
+    if (normPath === "/api/admin/question-bank" && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const blockParam = url.searchParams.get("block_id") || "all";
+      const typParam = url.searchParams.get("typovik_id") || "all";
+      const items = getAllQuestionBankItems({ typovik_id: typParam, block_id: blockParam });
+      return sendJson(res, 200, { items });
+    }
+
+    if (normPath === "/api/admin/question-bank" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const body = await readBody(req);
+      const saved = saveQuestionBankItem(body);
+      return sendJson(res, 200, { ok: true, item: saved });
+    }
+
+    const qbItemMatch = normPath.match(/^\/api\/admin\/question-bank\/([^/?#]+)$/);
+    if (qbItemMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(qbItemMatch[1]).trim();
+      const body = await readBody(req);
+      const saved = saveQuestionBankItem({ ...body, id });
+      return sendJson(res, 200, { ok: true, item: saved });
+    }
+
+    if (qbItemMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(qbItemMatch[1]).trim();
+      deleteQuestionBankItem(id);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // Typoviks
+    if (normPath === "/api/typoviks" && method === "GET") {
+      const sess = getSession(req);
+      const isAdmin = sess?.role === "admin";
+      const list = getAllTypoviks({ includeUnpublished: isAdmin });
+      const userId = sess?.userId || sess?.userObj?.id;
+
+      const enriched = list.map((t) => {
+        let variant = null;
+        let submission = null;
+        if (userId) {
+          variant = getTypovikVariant(t.id, userId);
+          submission = getTypovikSubmission(t.id, userId);
+        }
+        return {
+          ...t,
+          has_variant: Boolean(variant),
+          variant_num: variant?.variant_num || null,
+          user_submission: submission || null,
+        };
+      });
+      return sendJson(res, 200, { typoviks: enriched });
+    }
+
+    if (normPath === "/api/admin/typoviks" && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const list = getAllTypoviks({ includeUnpublished: true });
+      return sendJson(res, 200, { typoviks: list });
+    }
+
+    if (normPath === "/api/admin/typoviks" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const body = await readBody(req);
+      const saved = saveTypovik(body);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, typovik: saved });
+    }
+
+    const typItemMatch = normPath.match(/^\/api\/admin\/typoviks\/([^/?#]+)$/);
+    if (typItemMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(typItemMatch[1]).trim();
+      const body = await readBody(req);
+      const saved = saveTypovik({ ...body, id });
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true, typovik: saved });
+    }
+
+    if (typItemMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(typItemMatch[1]).trim();
+      deleteTypovik(id);
+      try { build(); } catch {}
+      return sendJson(res, 200, { ok: true });
+    }
+
+    const typGenMatch = normPath.match(/^\/api\/admin\/typoviks\/([^/?#]+)\/generate$/);
+    if (typGenMatch && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(typGenMatch[1]).trim();
+      const resGen = generateTypovikVariants(id);
+      return sendJson(res, 200, resGen);
+    }
+
+    const typVariantMatch = normPath.match(/^\/api\/typoviks\/([^/?#]+)\/variant$/);
+    if (typVariantMatch && method === "GET") {
+      const sess = getSession(req);
+      if (!sess) return sendJson(res, 401, { error: "Необходима авторизация" });
+      const typId = decodeURIComponent(typVariantMatch[1]).trim();
+      const typ = getTypovikById(typId);
+      if (!typ) return sendJson(res, 404, { error: "Типовой расчет не найден" });
+      const isAdmin = sess.role === "admin";
+      if (!typ.is_published && !isAdmin) {
+        return sendJson(res, 404, { error: "Типовой расчет не опубликован" });
+      }
+      const studentGroup = sess.userObj?.group_name;
+      if (typ.group_name && typ.group_name !== "all" && !isAdmin) {
+        const groups = typ.group_name.split(",").map((s) => s.trim().toLowerCase());
+        if (!studentGroup || !groups.includes(studentGroup.toLowerCase())) {
+          return sendJson(res, 403, { error: "Данная работа назначена другой группе" });
+        }
+      }
+      const userId = sess.userId || sess.userObj?.id;
+      const variant = getTypovikVariant(typId, userId);
+      const submission = getTypovikSubmission(typId, userId);
+      return sendJson(res, 200, { variant, submission, typovik: typ });
+    }
+
+    const typUploadMatch = normPath.match(/^\/api\/typoviks\/([^/?#]+)\/upload$/);
+    if (typUploadMatch && method === "POST") {
+      const sess = getSession(req);
+      if (!sess) return sendJson(res, 401, { error: "Необходима авторизация для сдачи типового расчета" });
+      const typId = decodeURIComponent(typUploadMatch[1]).trim();
+      const typ = getTypovikById(typId);
+      if (!typ) return sendJson(res, 404, { error: "Типовой расчет не найден" });
+      const isAdmin = sess.role === "admin";
+      if (!typ.is_published && !isAdmin) {
+        return sendJson(res, 404, { error: "Типовой расчет не опубликован" });
+      }
+      const studentGroup = sess.userObj?.group_name;
+      if (typ.group_name && typ.group_name !== "all" && !isAdmin) {
+        const groups = typ.group_name.split(",").map((s) => s.trim().toLowerCase());
+        if (!studentGroup || !groups.includes(studentGroup.toLowerCase())) {
+          return sendJson(res, 403, { error: "Сдача работы для вашей группы недоступна" });
+        }
+      }
+
+      const contentType = req.headers["content-type"] || "";
+      let uploadedFiles = [];
+
+      if (contentType.includes("multipart/form-data")) {
+        const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+        const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : null;
+        if (!boundary) return sendJson(res, 400, { error: "Некорректный multipart/form-data" });
+        const rawBuffer = await readRawBuffer(req);
+        uploadedFiles = parseMultipartFiles(rawBuffer, boundary);
+      } else if (contentType.includes("application/json")) {
+        const body = await readBody(req);
+        if (Array.isArray(body.images) && body.images.length > 0) {
+          uploadedFiles = body.images.map((img, i) => {
+            const b64 = String(img.data || "").replace(/^data:image\/\w+;base64,/, "");
+            return {
+              filename: img.filename || `solution_${i + 1}.png`,
+              buffer: Buffer.from(b64, "base64"),
+            };
+          });
+        } else if (body.data) {
+          const rawData = String(body.data);
+          if (rawData.startsWith("data:application/pdf") || (body.filename || "").toLowerCase().endsWith(".pdf")) {
+            const b64 = rawData.replace(/^data:application\/pdf;base64,/, "");
+            uploadedFiles = [{
+              filename: body.filename || "solution.pdf",
+              buffer: Buffer.from(b64, "base64"),
+            }];
+          } else {
+            const b64 = rawData.replace(/^data:image\/\w+;base64,/, "");
+            uploadedFiles = [{
+              filename: body.filename || "solution.png",
+              buffer: Buffer.from(b64, "base64"),
+            }];
+          }
+        }
+      }
+
+      if (uploadedFiles.length === 0) {
+        return sendJson(res, 400, { error: "Файлы не получены. Загрузите PDF или фотографии решения (PNG, JPG, WebP)." });
+      }
+
+      let subFileName = "";
+      let subFilePath = "";
+      let subFileType = "pdf";
+      let subImages = [];
+      let totalSize = 0;
+
+      const firstExt = path.extname(uploadedFiles[0].filename || "").toLowerCase();
+      const isPdf = firstExt === ".pdf" || isValidPdf(uploadedFiles[0].buffer);
+
+      if (isPdf) {
+        subFileType = "pdf";
+        let uploadResult;
+        try {
+          uploadResult = await saveUploadedPdf(uploadedFiles[0].filename, uploadedFiles[0].buffer);
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message });
+        }
+        subFileName = uploadResult.originalName;
+        subFilePath = uploadResult.filename;
+        totalSize = uploadResult.size;
+      } else {
+        // Загрузка фото / нескольких изображений
+        subFileType = uploadedFiles.length > 1 ? "images" : "image";
+        subFileName = uploadedFiles.length > 1
+          ? `Фотографии решения (${uploadedFiles.length} шт.)`
+          : uploadedFiles[0].filename;
+
+        for (const f of uploadedFiles) {
+          const resImg = saveUploadedImage(f.filename, f.buffer);
+          subImages.push(resImg.url);
+          totalSize += resImg.size;
+        }
+        subFilePath = subImages[0] || "";
+      }
+
+      const submission = saveTypovikSubmission({
+        typovik_id: typId,
+        user_id: sess.userId || sess.userObj?.id,
+        user_name: sess.userObj?.name || sess.user,
+        group_name: sess.userObj?.group_name || "",
+        file_name: subFileName,
+        file_path: subFilePath,
+        file_size: totalSize,
+        file_type: subFileType,
+        images: subImages,
+      });
+
+      return sendJson(res, 200, { ok: true, submission });
+    }
+
+    const typAdminSubsMatch = normPath.match(/^\/api\/admin\/typoviks\/([^/?#]+)\/submissions$/);
+    if (typAdminSubsMatch && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const typId = decodeURIComponent(typAdminSubsMatch[1]).trim();
+      const submissions = getTypovikSubmissions(typId, { group_name: groupParam });
+      return sendJson(res, 200, { submissions });
+    }
+
+    const typReviewMatch = normPath.match(/^\/api\/admin\/typoviks\/submissions\/([^/?#]+)\/review$/);
+    if (typReviewMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const subId = decodeURIComponent(typReviewMatch[1]).trim();
+      const body = await readBody(req);
+      const reviewed = reviewTypovikSubmission(subId, body);
+      return sendJson(res, 200, { ok: true, submission: reviewed });
+    }
+
+    // ----------------------------------------------------
+    // 4. SCHEDULE API
+    // ----------------------------------------------------
+    if (normPath === "/api/schedule" && method === "GET") {
+      const group = url.searchParams.get("group") || null;
+      const teacher = url.searchParams.get("teacher") || null;
+      const from = url.searchParams.get("from") || null;
+      const to = url.searchParams.get("to") || null;
+      const events = getAllScheduleEvents({ group, teacher, from, to });
+      return sendJson(res, 200, { events });
+    }
+
+    if (normPath === "/api/admin/schedule" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const body = await readBody(req);
+      if (!body.title || !body.starts_at) {
+        return sendJson(res, 400, { error: "Название и время начала обязательны" });
+      }
+      const saved = saveScheduleEvent(body);
+      return sendJson(res, 200, { ok: true, event: saved });
+    }
+
+    const schedItemMatch = normPath.match(/^\/api\/admin\/schedule\/([^/?#]+)$/);
+    if (schedItemMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(schedItemMatch[1]).trim();
+      const body = await readBody(req);
+      const saved = saveScheduleEvent({ ...body, id });
+      return sendJson(res, 200, { ok: true, event: saved });
+    }
+
+    if (schedItemMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(schedItemMatch[1]).trim();
+      deleteScheduleEvent(id);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // ----------------------------------------------------
+    // 5. STUDENT GRADES (ELECTRONIC SPREADSHEET) API
+    // ----------------------------------------------------
+    if (normPath === "/api/grades" && method === "GET") {
+      const group = url.searchParams.get("group") || "all";
+      const sheet = getGradesSpreadsheet({ group });
+      return sendJson(res, 200, sheet);
+    }
+
+    if (normPath === "/api/admin/grades" && (method === "PUT" || method === "POST")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Только преподаватель может выставлять оценки" });
+      const body = await readBody(req);
+      if (!body.user_id || !body.column_key) {
+        return sendJson(res, 400, { error: "user_id и column_key обязательны" });
+      }
+      const updated = saveStudentGrade(body);
+      return sendJson(res, 200, { ok: true, grade: updated });
+    }
+
+    if (normPath === "/api/admin/gradebook/columns" && method === "GET") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const columns = getAllGradeColumns();
+      return sendJson(res, 200, { columns });
+    }
+
+    if (normPath === "/api/admin/gradebook/columns" && method === "POST") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const body = await readBody(req);
+      if (!body.title) return sendJson(res, 400, { error: "Название столбца обязательно" });
+      const col = saveGradeColumn(body);
+      return sendJson(res, 200, { ok: true, column: col });
+    }
+
+    const colItemMatch = normPath.match(/^\/api\/admin\/gradebook\/columns\/([^/?#]+)$/);
+    if (colItemMatch && (method === "PUT" || method === "PATCH")) {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(colItemMatch[1]).trim();
+      const body = await readBody(req);
+      const col = saveGradeColumn({ ...body, id });
+      return sendJson(res, 200, { ok: true, column: col });
+    }
+
+    if (colItemMatch && method === "DELETE") {
+      const sess = getSession(req);
+      if (sess?.role !== "admin") return sendJson(res, 403, { error: "Доступ запрещен" });
+      const id = decodeURIComponent(colItemMatch[1]).trim();
+      deleteGradeColumn(id);
+      return sendJson(res, 200, { ok: true });
     }
 
     return sendJson(res, 404, { error: "API endpoint не найден" });

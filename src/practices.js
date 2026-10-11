@@ -13,31 +13,22 @@ class PracticesApp {
   }
 
   async init() {
-    this.currentUser = null;
-    this.isGuest = true;
+    this.currentUser = window.dmUser || null;
+    if (!this.currentUser) {
+      try {
+        const cached = sessionStorage.getItem("dm_cached_user");
+        if (cached) this.currentUser = JSON.parse(cached);
+      } catch {}
+    }
+    this.isGuest = !this.currentUser;
 
     // Check user group from storage or session
     const savedGroup = localStorage.getItem("dm_user_group");
     if (savedGroup) {
       this.selectedGroup = savedGroup;
+    } else if (this.currentUser?.group_name) {
+      this.selectedGroup = this.currentUser.group_name;
     }
-
-    const token = localStorage.getItem("dm_session") || localStorage.getItem("dm_admin_token");
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-    try {
-      const sessRes = await fetch("/api/auth/session", { headers, credentials: "same-origin" });
-      if (sessRes.ok) {
-        const sessData = await sessRes.json();
-        if (sessData.authenticated && sessData.user) {
-          this.currentUser = sessData.user;
-          this.isGuest = false;
-          if (this.currentUser.group_name && !this.selectedGroup) {
-            this.selectedGroup = this.currentUser.group_name;
-          }
-        }
-      }
-    } catch {}
 
     // Check query param or hash for selected practice
     const urlParams = new URLSearchParams(window.location.search);
@@ -46,25 +37,60 @@ class PracticesApp {
       this.selectedId = paramId;
     }
 
-    // Fetch fresh data from API if available
     try {
-      const res = await fetch("/api/practices", { headers, credentials: "same-origin" });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.practices) && data.practices.length > 0) {
-          this.practices = data.practices;
-        }
+      const cachedPractices = sessionStorage.getItem("dm_cached_practices");
+      if (cachedPractices) {
+        const parsed = JSON.parse(cachedPractices);
+        if (Array.isArray(parsed) && parsed.length > 0) this.practices = parsed;
       }
     } catch {}
 
     this.bindEvents();
     this.render();
+
+    const token = localStorage.getItem("dm_session") || localStorage.getItem("dm_admin_token");
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    try {
+      const [sessRes, pracRes] = await Promise.all([
+        fetch("/api/auth/session", { headers, credentials: "same-origin" }).catch(() => null),
+        fetch("/api/practices", { headers, credentials: "same-origin" }).catch(() => null),
+      ]);
+
+      if (sessRes && sessRes.ok) {
+        const sessData = await sessRes.json();
+        if (sessData.authenticated && sessData.user) {
+          this.currentUser = sessData.user;
+          this.isGuest = false;
+          if (this.currentUser.group_name && (!this.selectedGroup || this.selectedGroup === "all")) {
+            this.selectedGroup = this.currentUser.group_name;
+          }
+        } else {
+          this.currentUser = null;
+          this.isGuest = true;
+        }
+      }
+
+      if (pracRes && pracRes.ok) {
+        const data = await pracRes.json();
+        if (Array.isArray(data.practices) && data.practices.length > 0) {
+          this.practices = data.practices;
+          try { sessionStorage.setItem("dm_cached_practices", JSON.stringify(this.practices)); } catch {}
+        }
+      }
+      this.render();
+    } catch {}
   }
 
   bindEvents() {
+    window.addEventListener("dm:auth-updated", (e) => {
+      this.currentUser = e.detail || null;
+      this.isGuest = !this.currentUser;
+      this.render();
+    });
+
     const groupSelect = document.getElementById("practice-group-select");
     if (groupSelect) {
-      // Set initial value
       if (Array.from(groupSelect.options).some((o) => o.value === this.selectedGroup)) {
         groupSelect.value = this.selectedGroup;
       }
@@ -85,9 +111,15 @@ class PracticesApp {
     const mobileBtn = document.getElementById("practices-menu-btn");
     const sidebar = document.getElementById("practices-sidebar");
     if (mobileBtn && sidebar) {
-      mobileBtn.onclick = () => {
+      mobileBtn.onclick = (e) => {
+        e.stopPropagation();
         sidebar.classList.toggle("open");
       };
+      document.addEventListener("click", (e) => {
+        if (sidebar.classList.contains("open") && !sidebar.contains(e.target) && !mobileBtn.contains(e.target)) {
+          sidebar.classList.remove("open");
+        }
+      });
     }
   }
 
