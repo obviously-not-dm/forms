@@ -282,12 +282,16 @@ function checkKey(q, where, errors) {
 
 // ---------- страницы ----------
 
+// Страница теста открыта без слеша (/sets вместо /sets/): тогда key.json и картинки
+// ищутся в корне сайта. Сервер такой адрес не исправляет, поэтому дописываем слеш сами.
+const SLASH = `<script>if (!location.pathname.endsWith("/")) location.replace(location.pathname + "/" + location.search + location.hash);</script>\n`;
+
 function head(title, rel, extra = "", math = false) {
   return `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+${rel ? SLASH : ""}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
 <link rel="preload" href="${rel}assets/fonts/onest-cyrillic-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 ${math ? `<link rel="stylesheet" href="${rel}assets/katex/katex.min.css">\n` : ""}<link rel="stylesheet" href="${rel}assets/style.css">
